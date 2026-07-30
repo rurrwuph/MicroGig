@@ -1,0 +1,28 @@
+# Environment & Local Configuration
+.env
+.env.local
+*.log
+
+# Maven & Java build artifacts
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Node & Frontend build artifacts
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs & Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.iml
+*.iws
+*.ipr
+.DS_Store
+Thumbs.db
