@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: backend
+
+  main:
+    allow-circular-references: true
+
+  # Database Configuration
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/microgig}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  # JPA / Hibernate Configuration
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # Redis Configuration
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+  # OAuth 2.0 Client Configuration
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:placeholder-google-client-id}
+            client-secret: ${GOOGLE_CLIENT_SECRET:placeholder-google-client-secret}
+            scope:
+              - openid
+              - profile
+              - email
+            redirect-uri: "{baseUrl}/login/oauth2/code/google"
+
+server:
+  port: 8080
+  forward-headers-strategy: framework
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:ZGVmYXVsdFNlY3JldEtleUZvckp3dFRva2VuR2VuZXJhdGlvbjEyMzQ1Njc4OTA=}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# Swagger / OpenAPI
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+# MicroGig Business Rules & Platform Configuration
+microgig:
+  cancellation-grace-minutes: ${CANCELLATION_GRACE_MINUTES:5}
+  admin-commission-rate: ${ADMIN_COMMISSION_RATE:0.001}
+  frontend-url: ${FRONTEND_REDIRECT_URL:http://localhost:3000}
