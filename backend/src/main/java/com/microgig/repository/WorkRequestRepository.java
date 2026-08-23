@@ -20,6 +20,11 @@ public interface WorkRequestRepository extends JpaRepository<WorkRequest, Long> 
     @Query("SELECT w FROM WorkRequest w WHERE w.status = :status ORDER BY w.createdAt DESC")
     List<WorkRequest> findByStatusOrderByCreatedAtDesc(@Param("status") WorkStatus status);
 
-    @Query(value = "SELECT COUNT(*) FROM work_requests WHERE client_id = :clientId AND status = :status", nativeQuery = true)
+    @Query("SELECT w FROM WorkRequest w WHERE w.status = com.microgig.model.WorkStatus.FLAGGED ORDER BY w.appealRequested DESC, w.flaggedAt DESC, w.createdAt DESC")
+    List<WorkRequest> findFlaggedWorkRequests();
+
+    long countByStatus(WorkStatus status);
+
+    @Query(value = "SELECT COUNT(*) FROM work_requests WHERE client_id = :clientId AND status = :status AND is_deleted = false", nativeQuery = true)
     long countByClientAndStatusNative(@Param("clientId") Long clientId, @Param("status") String status);
 }

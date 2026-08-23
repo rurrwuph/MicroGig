@@ -102,7 +102,7 @@ const PostJob = ({ user }) => {
 
     setLoading(true);
     try {
-      await api.post('/work', {
+      const res = await api.post('/work', {
         title:       form.title.trim(),
         description: form.description.trim(),
         category:    form.category,
@@ -110,7 +110,11 @@ const PostJob = ({ user }) => {
         amount:      Number(form.amount),
         deadline:    new Date(form.deadline + 'T23:59:59').toISOString(),
       });
-      toast.success('Job posted successfully! Freelancers can now apply.');
+      if (res.data?.status === 'FLAGGED') {
+        toast.warning('Job posted, but FLAGGED for review: ' + (res.data.moderationReason || 'Policy check violation detected.'));
+      } else {
+        toast.success('Job posted successfully! Freelancers can now apply.');
+      }
       navigate('/my-assignments');
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data || 'Failed to post job. Please try again.';

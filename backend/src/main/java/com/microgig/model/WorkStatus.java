@@ -1,8 +1,11 @@
 package com.microgig.model;
 
 public enum WorkStatus {
+    DRAFT,
     OPEN,
     ASSIGNED,
-    COMPLETED,
-    CANCELLED
+    FLAGGED,
+    SUSPENDED,
+    CANCELLED,
+    COMPLETED
 }

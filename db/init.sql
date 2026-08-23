@@ -41,6 +41,13 @@ CREATE TABLE work_requests (
     status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
     category VARCHAR(255),
     skills VARCHAR(255),
+    moderation_reason VARCHAR(1000),
+    flagged_at TIMESTAMP WITHOUT TIME ZONE,
+    appeal_requested BOOLEAN NOT NULL DEFAULT FALSE,
+    appeal_notes VARCHAR(1000),
+    appeal_requested_at TIMESTAMP WITHOUT TIME ZONE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP WITHOUT TIME ZONE,
     cancelled_at TIMESTAMP WITHOUT TIME ZONE,
     last_modified_at TIMESTAMP WITHOUT TIME ZONE,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()

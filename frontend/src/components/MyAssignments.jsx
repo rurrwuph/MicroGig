@@ -112,6 +112,11 @@ const MyAssignments = ({ user, setUser }) => {
   const [payForm, setPayForm] = useState({ rating: 5, review: '' });
   const [payLoading, setPayLoading] = useState(false);
 
+  // 7. Client Appeal Modal
+  const [appealModalJob, setAppealModalJob] = useState(null);
+  const [appealNotes, setAppealNotes] = useState('');
+  const [appealLoading, setAppealLoading] = useState(false);
+
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
@@ -244,7 +249,7 @@ const MyAssignments = ({ user, setUser }) => {
 
     setEditLoading(true);
     try {
-      await api.put(`/work/${editJobModal.id}`, {
+      const res = await api.put(`/work/${editJobModal.id}`, {
         title: editForm.title.trim(),
         description: editForm.description.trim(),
         category: editForm.category,
@@ -253,18 +258,44 @@ const MyAssignments = ({ user, setUser }) => {
         deadline: editForm.deadline ? new Date(editForm.deadline).toISOString() : null,
       });
 
-      toast.success(editJobModal.status === 'ASSIGNED'
-        ? 'Job updated! The assigned freelancer has been notified of the scope changes.'
-        : 'Job post updated successfully!'
-      );
+      if (res.data?.status === 'FLAGGED') {
+        toast.warning('Job updated, but still flagged: ' + (res.data.moderationReason || 'Policy check violation detected.'));
+      } else {
+        toast.success(editJobModal.status === 'ASSIGNED'
+          ? 'Job updated! The assigned freelancer has been notified of the scope changes.'
+          : 'Job post updated and published successfully!'
+        );
+      }
       setEditJobModal(null);
       fetchData();
       refreshUserData();
     } catch (err) {
-      const msg = err.response?.data || 'Failed to update job.';
+      const msg = err.response?.data?.message || err.response?.data || 'Failed to update job.';
       toast.error(typeof msg === 'string' ? msg : 'Update failed.');
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  /* ── CLIENT: Submit Moderation Appeal ── */
+  const handleSubmitAppeal = async (e) => {
+    e.preventDefault();
+    if (!appealModalJob) return;
+
+    setAppealLoading(true);
+    try {
+      await api.post(`/work/${appealModalJob.id}/appeal`, {
+        appealNotes: appealNotes.trim()
+      });
+      toast.success('Appeal submitted! An administrator will review your job post shortly.');
+      setAppealModalJob(null);
+      setAppealNotes('');
+      fetchData();
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data || 'Failed to submit appeal.';
+      toast.error(typeof msg === 'string' ? msg : 'Appeal submission failed.');
+    } finally {
+      setAppealLoading(false);
     }
   };
 
@@ -396,6 +427,8 @@ const MyAssignments = ({ user, setUser }) => {
               {clientJobs.map((job) => {
                 const isAssigned = job.status === 'ASSIGNED';
                 const isOpen = job.status === 'OPEN';
+                const isFlagged = job.status === 'FLAGGED';
+                const isSuspended = job.status === 'SUSPENDED';
                 const isDone = job.status === 'COMPLETED';
                 const isCancelled = job.status === 'CANCELLED';
 
@@ -419,6 +452,62 @@ const MyAssignments = ({ user, setUser }) => {
                         <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginTop: '0.35rem', lineHeight: 1.5 }}>
                           {job.description}
                         </p>
+
+                        {/* Moderation Alert Banner for FLAGGED posts */}
+                        {isFlagged && (
+                          <div style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 'var(--r-md)', marginTop: '0.75rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                              <div style={{ flex: 1, minWidth: '220px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--clr-error)', fontWeight: 700, fontSize: '0.85rem' }}>
+                                  <span>⚠️ Flagged for Policy Review</span>
+                                  {job.appealRequested && (
+                                    <span style={{ fontSize: '0.72rem', background: 'rgba(99, 102, 241, 0.2)', color: 'var(--clr-primary)', padding: '2px 6px', borderRadius: '4px' }}>
+                                      Appeal Under Admin Review
+                                    </span>
+                                  )}
+                                </div>
+                                <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: 'var(--clr-text-2)', lineHeight: 1.4 }}>
+                                  {job.moderationReason || 'Prohibited contact or payment details detected.'}
+                                </p>
+                                {job.appealNotes && (
+                                  <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--clr-text-3)' }}>
+                                    <strong>Your Appeal Note:</strong> "{job.appealNotes}"
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => handleOpenEditJob(job)}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                >
+                                  <IconEdit size={13} /> Edit & Fix
+                                </button>
+                                {!job.appealRequested && (
+                                  <button
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => { setAppealModalJob(job); setAppealNotes(''); }}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  >
+                                    Appeal Flag
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Suspension Notice */}
+                        {isSuspended && (
+                          <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: 'var(--r-md)', marginTop: '0.75rem' }}>
+                            <div style={{ color: 'var(--clr-error)', fontWeight: 700, fontSize: '0.85rem' }}>
+                              🛑 Suspended by Administrator
+                            </div>
+                            <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: 'var(--clr-text-2)' }}>
+                              {job.moderationReason || 'This job was suspended due to policy violations.'}
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ textAlign: 'right' }}>
@@ -1085,6 +1174,54 @@ const MyAssignments = ({ user, setUser }) => {
                 </button>
                 <button type="submit" className="btn btn-success" disabled={payLoading}>
                   {payLoading ? <><span className="spinner" /> Processing…</> : `Confirm Release ($${Number(payModalAssignment.workRequest?.amount || 0).toFixed(2)})`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 7. CLIENT: Moderation Appeal Modal */}
+      {appealModalJob && (
+        <div className="modal-overlay" onClick={() => setAppealModalJob(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Submit Moderation Appeal</h3>
+              <button className="modal-close-btn" onClick={() => setAppealModalJob(null)}>
+                <IconClose size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitAppeal}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginBottom: '1rem' }}>
+                If you believe your job post "<strong>{appealModalJob.title}</strong>" was flagged in error, please provide an explanation below. An administrator will review your appeal.
+              </p>
+
+              <div className="form-group">
+                <label className="form-label">Flagged Reason</label>
+                <div style={{ padding: '0.6rem 0.8rem', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 'var(--r-md)', fontSize: '0.8rem', color: 'var(--clr-error)', marginBottom: '1rem' }}>
+                  {appealModalJob.moderationReason || 'Policy check violation.'}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Appeal Explanation *</label>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  placeholder="Explain why this post complies with MicroGig platform policies…"
+                  value={appealNotes}
+                  onChange={e => setAppealNotes(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setAppealModalJob(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={appealLoading || !appealNotes.trim()}>
+                  {appealLoading ? <><span className="spinner" /> Submitting…</> : 'Submit Appeal'}
                 </button>
               </div>
             </form>

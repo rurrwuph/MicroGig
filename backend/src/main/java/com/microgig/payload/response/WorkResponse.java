@@ -24,6 +24,18 @@ public class WorkResponse implements Serializable {
     private String status;
     private String category;
     private String skills;
+
+    // Moderation & Appeal Details
+    private String moderationReason;
+    private LocalDateTime flaggedAt;
+    private Boolean appealRequested;
+    private String appealNotes;
+    private LocalDateTime appealRequestedAt;
+
+    // Soft Deletion
+    private Boolean isDeleted;
+    private LocalDateTime deletedAt;
+
     private LocalDateTime cancelledAt;
     private LocalDateTime lastModifiedAt;
     private LocalDateTime createdAt;

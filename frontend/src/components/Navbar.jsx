@@ -15,6 +15,7 @@ import {
   IconMoon,
   IconBell,
   IconCheck,
+  IconAlert,
   IconAlertCircle,
   IconInfo
 } from './Icons';
@@ -123,7 +124,7 @@ const Navbar = ({ user, setUser, theme = 'dark', toggleTheme }) => {
   ];
 
   const adminLinks = [
-    { path: '/dashboard', label: 'Overview', icon: <IconDashboard size={15} /> },
+    { path: '/dashboard', label: 'Moderation Queue & Overview', icon: <IconAlert size={15} /> },
     { path: '/jobs', label: 'Marketplace Jobs', icon: <IconSearch size={15} /> },
   ];
 

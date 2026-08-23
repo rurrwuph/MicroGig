@@ -1,5 +1,6 @@
 package com.microgig.controller;
 
+import com.microgig.payload.request.AppealRequest;
 import com.microgig.payload.request.WorkCreateRequest;
 import com.microgig.payload.request.WorkUpdateRequest;
 import com.microgig.payload.response.MessageResponse;
@@ -33,6 +34,16 @@ public class WorkController {
     }
 
     /**
+     * GET /api/work/{id}
+     * Returns a specific work request by ID.
+     */
+    @GetMapping("/{id}")
+    public ResponseEntity<WorkResponse> getWorkById(@PathVariable Long id) {
+        WorkResponse response = workService.getWorkById(id);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * GET /api/work/my
      * Returns all work requests posted by the authenticated client.
      */
@@ -48,7 +59,7 @@ public class WorkController {
      */
     @PostMapping
     public ResponseEntity<WorkResponse> createWorkRequest(@Valid @RequestBody WorkCreateRequest request,
-                                                         @AuthenticationPrincipal UserDetailsImpl userDetails) {
+                                                          @AuthenticationPrincipal UserDetailsImpl userDetails) {
         WorkResponse response = workService.createWork(userDetails.getId(), request);
         return ResponseEntity.ok(response);
     }
@@ -59,9 +70,21 @@ public class WorkController {
      */
     @PutMapping("/{id}")
     public ResponseEntity<WorkResponse> updateWorkRequest(@PathVariable Long id,
-                                                         @Valid @RequestBody WorkUpdateRequest request,
-                                                         @AuthenticationPrincipal UserDetailsImpl userDetails) {
+                                                          @Valid @RequestBody WorkUpdateRequest request,
+                                                          @AuthenticationPrincipal UserDetailsImpl userDetails) {
         WorkResponse response = workService.updateWork(userDetails.getId(), id, request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * POST /api/work/{id}/appeal
+     * Client submits an appeal for a FLAGGED post.
+     */
+    @PostMapping("/{id}/appeal")
+    public ResponseEntity<WorkResponse> appealWorkRequest(@PathVariable Long id,
+                                                          @Valid @RequestBody(required = false) AppealRequest request,
+                                                          @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        WorkResponse response = workService.appealWork(userDetails.getId(), id, request);
         return ResponseEntity.ok(response);
     }
 
