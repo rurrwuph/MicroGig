@@ -39,6 +39,7 @@ public class WorkResponse implements Serializable {
     private LocalDateTime cancelledAt;
     private LocalDateTime lastModifiedAt;
     private LocalDateTime createdAt;
+    private Long applicationsCount;
 
     // Nested Client Summary
     private ClientSummaryDto client;

@@ -216,4 +216,164 @@ public class AdminServiceImpl implements AdminService {
             }
         }
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<com.microgig.payload.response.AdminUserResponse> getUsersDrillDown(String role, Boolean locked, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<User> usersPage;
+
+        if (role != null && !role.isBlank()) {
+            Role r = Role.valueOf(role.trim().toUpperCase().startsWith("ROLE_") ? role.trim().toUpperCase() : "ROLE_" + role.trim().toUpperCase());
+            if (locked != null) {
+                usersPage = userRepository.findByRoleAndIsLocked(r, locked, pageable);
+            } else {
+                usersPage = userRepository.findByRole(r, pageable);
+            }
+        } else if (locked != null) {
+            usersPage = userRepository.findByIsLocked(locked, pageable);
+        } else {
+            usersPage = userRepository.findAll(pageable);
+        }
+
+        return usersPage.map(u -> {
+            long postedJobs = workRequestRepository.findByClient(u).size();
+            long completedAssignments = workAssignmentRepository.findByFreelancer(u).stream()
+                    .filter(a -> a.getStatus() == AssignmentStatus.COMPLETED)
+                    .count();
+
+            return com.microgig.payload.response.AdminUserResponse.builder()
+                    .id(u.getId())
+                    .username(u.getUsername())
+                    .email(u.getEmail())
+                    .fullName(u.getFullName() != null ? u.getFullName() : "")
+                    .role(u.getRole() != null ? u.getRole().name() : "")
+                    .balance(u.getBalance() != null ? u.getBalance() : java.math.BigDecimal.ZERO)
+                    .locked(u.isLocked())
+                    .createdAt(u.getCreatedAt())
+                    .postedJobsCount(postedJobs)
+                    .completedAssignmentsCount(completedAssignments)
+                    .build();
+        });
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.microgig.payload.response.ClientAnalyticsResponse> getClientsAnalytics() {
+        List<User> clients = userRepository.findAll().stream()
+                .filter(u -> u.getRole() == Role.ROLE_CLIENT)
+                .collect(Collectors.toList());
+
+        return clients.stream().map(c -> {
+            List<WorkRequest> requests = workRequestRepository.findByClient(c);
+            long totalPosted = requests.size();
+            long activeGigs = requests.stream().filter(r -> r.getStatus() == WorkStatus.ASSIGNED || r.getStatus() == WorkStatus.OPEN).count();
+            long completedGigs = requests.stream().filter(r -> r.getStatus() == WorkStatus.COMPLETED).count();
+
+            java.math.BigDecimal totalSpent = requests.stream()
+                    .filter(r -> r.getStatus() == WorkStatus.COMPLETED)
+                    .map(WorkRequest::getAmount)
+                    .filter(java.util.Objects::nonNull)
+                    .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+
+            return com.microgig.payload.response.ClientAnalyticsResponse.builder()
+                    .id(c.getId())
+                    .username(c.getUsername())
+                    .email(c.getEmail())
+                    .fullName(c.getFullName() != null ? c.getFullName() : "")
+                    .balance(c.getBalance() != null ? c.getBalance() : java.math.BigDecimal.ZERO)
+                    .locked(c.isLocked())
+                    .totalPostedJobs(totalPosted)
+                    .activeGigsCount(activeGigs)
+                    .completedGigsCount(completedGigs)
+                    .totalSpent(totalSpent)
+                    .createdAt(c.getCreatedAt())
+                    .build();
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.microgig.payload.response.FreelancerAnalyticsResponse> getFreelancersAnalytics() {
+        List<User> freelancers = userRepository.findAll().stream()
+                .filter(u -> u.getRole() == Role.ROLE_FREELANCER)
+                .collect(Collectors.toList());
+
+        return freelancers.stream().map(f -> {
+            List<WorkAssignment> assignments = workAssignmentRepository.findByFreelancer(f);
+            long completed = assignments.stream().filter(a -> a.getStatus() == AssignmentStatus.COMPLETED).count();
+            long active = assignments.stream().filter(a -> a.getStatus() == AssignmentStatus.ACCEPTED || a.getStatus() == AssignmentStatus.IN_PROGRESS || a.getStatus() == AssignmentStatus.REVISION_REQUESTED).count();
+
+            List<WorkAssignment> rated = assignments.stream()
+                    .filter(a -> a.getStatus() == AssignmentStatus.COMPLETED && a.getRating() != null)
+                    .collect(Collectors.toList());
+
+            Double avgRating = rated.isEmpty() ? null : rated.stream().mapToInt(WorkAssignment::getRating).average().orElse(0.0);
+
+            return com.microgig.payload.response.FreelancerAnalyticsResponse.builder()
+                    .id(f.getId())
+                    .username(f.getUsername())
+                    .email(f.getEmail())
+                    .fullName(f.getFullName() != null ? f.getFullName() : "")
+                    .balance(f.getBalance() != null ? f.getBalance() : java.math.BigDecimal.ZERO)
+                    .locked(f.isLocked())
+                    .completedGigsCount(completed)
+                    .activeGigsCount(active)
+                    .averageRating(avgRating != null ? Math.round(avgRating * 10.0) / 10.0 : null)
+                    .totalReviews(rated.size())
+                    .createdAt(f.getCreatedAt())
+                    .build();
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<WorkResponse> getWorkRequestsDrillDown(WorkStatus status, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<WorkRequest> page;
+        if (status != null) {
+            page = workRequestRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
+        } else {
+            page = workRequestRepository.findAllByOrderByCreatedAtDesc(pageable);
+        }
+        return page.map(EntityDtoMapper::toWorkResponse);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "availableWork", allEntries = true)
+    public WorkResponse flagWorkRequestManually(Long adminId, Long workRequestId, com.microgig.payload.request.ManualFlagRequest request) {
+        User admin = userRepository.findById(adminId)
+                .orElseThrow(() -> new IllegalArgumentException("Admin not found with id: " + adminId));
+
+        if (admin.getRole() != Role.ROLE_ADMIN) {
+            throw new IllegalStateException("Only administrators can manually flag work requests.");
+        }
+
+        WorkRequest workRequest = workRequestRepository.findById(workRequestId)
+                .orElseThrow(() -> new IllegalArgumentException("Work request not found with id: " + workRequestId));
+
+        LocalDateTime now = LocalDateTime.now();
+        workRequest.setStatus(WorkStatus.FLAGGED);
+        workRequest.setFlaggedAt(now);
+        workRequest.setModerationReason("Admin Manual Flag: " + request.getModerationReason().trim());
+        workRequest.setAppealRequested(false);
+        workRequest.setAppealNotes(null);
+        workRequest.setAppealRequestedAt(null);
+
+        workRequest = workRequestRepository.save(workRequest);
+
+        // Notify client
+        Notification notif = Notification.builder()
+                .user(workRequest.getClient())
+                .type("POST_FLAGGED_BY_ADMIN")
+                .title("Job Flagged by Administrator: " + workRequest.getTitle())
+                .message("Your job post has been flagged for administrative review. Reason: " + request.getModerationReason().trim())
+                .referenceId(workRequest.getId())
+                .isRead(false)
+                .createdAt(now)
+                .build();
+        notificationRepository.save(notif);
+
+        return EntityDtoMapper.toWorkResponse(workRequest);
+    }
 }
+

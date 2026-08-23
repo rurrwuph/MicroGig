@@ -1,8 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useToast } from './Toast';
-import { IconSearch, IconCalendar, IconClock, IconUser, IconRefresh, IconEdit, IconCheck } from './Icons';
+import {
+  IconSearch,
+  IconCalendar,
+  IconClock,
+  IconUser,
+  IconRefresh,
+  IconEdit,
+  IconCheck,
+  IconClose,
+  IconSend
+} from './Icons';
 
 const STATUS_FILTERS = ['ALL', 'OPEN', 'ASSIGNED', 'COMPLETED'];
 const CATEGORY_FILTERS = [
@@ -37,42 +47,104 @@ const WorkList = ({ user }) => {
   const isClient = user?.role === 'ROLE_CLIENT';
 
   const [works, setWorks] = useState([]);
+  const [myApplications, setMyApplications] = useState([]);
+  const [liveStatsMap, setLiveStatsMap] = useState({});
   const [loading, setLoading] = useState(true);
-  const [accepting, setAccepting] = useState(null);
+
+  // Search & Filter State
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('OPEN');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [sortBy, setSortBy] = useState('NEWEST');
 
-  useEffect(() => {
-    loadWorks();
-  }, []);
+  // Proposal / Apply Modal State
+  const [applyModalJob, setApplyModalJob] = useState(null);
+  const [proposalForm, setProposalForm] = useState({
+    bidAmount: '',
+    estimatedDays: 3,
+    proposalNotes: ''
+  });
+  const [submittingProposal, setSubmittingProposal] = useState(false);
 
-  const loadWorks = async () => {
+  const loadWorks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/work');
-      setWorks(res.data);
+      const [worksRes, appsRes] = await Promise.all([
+        api.get('/work'),
+        isFreelancer ? api.get('/applications/my').catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
+      ]);
+      setWorks(worksRes.data || []);
+      setMyApplications(appsRes.data || []);
     } catch {
       toast.error('Failed to load jobs. Please try again.');
     } finally {
       setLoading(false);
     }
+  }, [isFreelancer]);
+
+  useEffect(() => {
+    loadWorks();
+  }, [loadWorks]);
+
+  // Fetch live viewer stats for open works
+  useEffect(() => {
+    if (works.length === 0) return;
+
+    const fetchLiveStats = async () => {
+      const openWorks = works.filter(w => w.status === 'OPEN').slice(0, 8);
+      const updates = {};
+      await Promise.all(
+        openWorks.map(async (w) => {
+          try {
+            const res = await api.get(`/work/${w.id}/live-stats`);
+            if (res.data) {
+              updates[w.id] = res.data;
+            }
+          } catch { /* ignore */ }
+        })
+      );
+      setLiveStatsMap(prev => ({ ...prev, ...updates }));
+    };
+
+    fetchLiveStats();
+    const interval = setInterval(fetchLiveStats, 20000);
+    return () => clearInterval(interval);
+  }, [works]);
+
+  const openApplyModal = (job) => {
+    setApplyModalJob(job);
+    setProposalForm({
+      bidAmount: job.amount,
+      estimatedDays: 3,
+      proposalNotes: ''
+    });
   };
 
-  const acceptWork = async (id, title) => {
-    setAccepting(id);
+  const handleApplySubmit = async (e) => {
+    e.preventDefault();
+    if (!applyModalJob) return;
+
+    setSubmittingProposal(true);
     try {
-      await api.post(`/assignments/${id}/accept`);
-      toast.success(`You have accepted: "${title}"`);
-      loadWorks();
-      navigate('/my-assignments');
+      const res = await api.post(`/work/${applyModalJob.id}/apply`, {
+        proposalNotes: proposalForm.proposalNotes.trim(),
+        bidAmount: Number(proposalForm.bidAmount),
+        estimatedDays: Number(proposalForm.estimatedDays)
+      });
+
+      toast.success(`Proposal submitted for "${applyModalJob.title}"! The client has been notified.`);
+      setMyApplications(prev => [res.data, ...prev]);
+      setApplyModalJob(null);
     } catch (err) {
-      const msg = err.response?.data || 'Failed to accept. This job may already be taken.';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to accept job.');
+      const msg = err.response?.data?.message || err.response?.data || 'Failed to submit proposal.';
+      toast.error(typeof msg === 'string' ? msg : 'Failed to submit proposal.');
     } finally {
-      setAccepting(null);
+      setSubmittingProposal(false);
     }
+  };
+
+  const hasApplied = (workId) => {
+    return myApplications.some(app => app.workRequestId === workId && app.status === 'PENDING');
   };
 
   const filtered = works
@@ -115,7 +187,7 @@ const WorkList = ({ user }) => {
       {/* Header */}
       <div className="jobs-page-header">
         <div>
-          <h1>{isFreelancer ? 'Find Work' : 'Browse Jobs'}</h1>
+          <h1>{isFreelancer ? 'Find Work & Submit Proposals' : 'Browse Marketplace Gigs'}</h1>
           <p>{filtered.length} job{filtered.length !== 1 ? 's' : ''} available</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -229,6 +301,8 @@ const WorkList = ({ user }) => {
           {filtered.map(w => {
             const skillsList = w.skills ? w.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
             const isMyPost = user && w.client?.id === user.id;
+            const applied = hasApplied(w.id);
+            const liveStats = liveStatsMap[w.id];
 
             return (
               <div key={w.id} className="job-card" style={isMyPost ? { border: '1px solid var(--clr-primary)' } : {}}>
@@ -241,6 +315,12 @@ const WorkList = ({ user }) => {
                       {isMyPost && (
                         <span className="badge badge-assigned" style={{ fontSize: '0.68rem', padding: '0.15rem 0.5rem' }}>
                           Your Post
+                        </span>
+                      )}
+                      {/* Redis Live Viewers Badge */}
+                      {liveStats && liveStats.activeViewers > 0 && (
+                        <span style={{ fontSize: '0.68rem', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--clr-error)', padding: '2px 7px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          🔥 {liveStats.activeViewers} viewing now
                         </span>
                       )}
                     </div>
@@ -292,17 +372,20 @@ const WorkList = ({ user }) => {
                   </span>
 
                   {isFreelancer && w.status === 'OPEN' && (
-                    <button
-                      id={`btn-accept-${w.id}`}
-                      className="btn btn-primary btn-sm"
-                      disabled={accepting === w.id}
-                      onClick={() => acceptWork(w.id, w.title)}
-                    >
-                      {accepting === w.id
-                        ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Accepting…</>
-                        : 'Accept Job'
-                      }
-                    </button>
+                    applied ? (
+                      <span className="badge badge-assigned" style={{ fontSize: '0.8rem', padding: '6px 12px', fontWeight: 700 }}>
+                        ✓ Applied (Pending)
+                      </span>
+                    ) : (
+                      <button
+                        id={`btn-apply-${w.id}`}
+                        className="btn btn-primary btn-sm"
+                        onClick={() => openApplyModal(w)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                      >
+                        <IconSend size={13} /> Apply with Proposal
+                      </button>
+                    )
                   )}
 
                   {isMyPost && (
@@ -311,19 +394,99 @@ const WorkList = ({ user }) => {
                       onClick={() => navigate('/my-assignments')}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                     >
-                      <IconEdit size={13} /> Manage Post
+                      <IconEdit size={13} /> Review Proposals
                     </button>
                   )}
 
                   {!isFreelancer && !isMyPost && w.status === 'OPEN' && (
                     <span style={{ fontSize: '0.775rem', color: 'var(--clr-text-3)' }}>
-                      Awaiting freelancer
+                      Accepting proposals
                     </span>
                   )}
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Freelancer Proposal / Application Modal */}
+      {applyModalJob && (
+        <div className="modal-overlay" onClick={() => setApplyModalJob(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Apply for: {applyModalJob.title}</h3>
+              <button className="modal-close-btn" onClick={() => setApplyModalJob(null)}>
+                <IconClose size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleApplySubmit}>
+              <div style={{ background: 'var(--clr-surface-2)', padding: '0.85rem 1rem', borderRadius: 'var(--r-md)', marginBottom: '1.25rem', border: '1px solid var(--clr-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
+                  <span>Client Budget:</span>
+                  <strong>${Number(applyModalJob.amount).toFixed(2)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--clr-text-3)' }}>
+                  <span>Client Deadline:</span>
+                  <span>{formatDate(applyModalJob.deadline)}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Your Bid Amount ($) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1.00"
+                    className="form-input"
+                    value={proposalForm.bidAmount}
+                    onChange={e => setProposalForm(p => ({ ...p, bidAmount: e.target.value }))}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Estimated Days to Deliver *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    className="form-input"
+                    value={proposalForm.estimatedDays}
+                    onChange={e => setProposalForm(p => ({ ...p, estimatedDays: e.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Proposal Cover Message *</label>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  placeholder="Explain why you are the best fit for this gig, your approach, and relevant experience…"
+                  value={proposalForm.proposalNotes}
+                  onChange={e => setProposalForm(p => ({ ...p, proposalNotes: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setApplyModalJob(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submittingProposal || !proposalForm.proposalNotes.trim() || !proposalForm.bidAmount}
+                >
+                  {submittingProposal ? <><span className="spinner" /> Submitting…</> : 'Submit Proposal'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

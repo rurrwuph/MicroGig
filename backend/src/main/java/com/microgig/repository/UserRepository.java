@@ -30,4 +30,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Query(value = "SELECT COUNT(*) FROM users WHERE role = :role", nativeQuery = true)
     long countUsersByRoleNative(@Param("role") String role);
+
+    org.springframework.data.domain.Page<User> findByRole(Role role, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<User> findByIsLocked(boolean isLocked, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<User> findByRoleAndIsLocked(Role role, boolean isLocked, org.springframework.data.domain.Pageable pageable);
 }

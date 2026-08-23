@@ -70,6 +70,18 @@ CREATE TABLE work_assignments (
     reviewed_at TIMESTAMP WITHOUT TIME ZONE
 );
 
+CREATE TABLE work_applications (
+    id BIGSERIAL PRIMARY KEY,
+    work_request_id BIGINT NOT NULL REFERENCES work_requests(id) ON DELETE CASCADE,
+    freelancer_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    proposal_notes VARCHAR(2000) NOT NULL,
+    bid_amount NUMERIC(12, 2) NOT NULL,
+    estimated_days INTEGER NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    applied_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    decided_at TIMESTAMP WITHOUT TIME ZONE
+);
+
 CREATE TABLE transactions (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

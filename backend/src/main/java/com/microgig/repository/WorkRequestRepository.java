@@ -27,4 +27,8 @@ public interface WorkRequestRepository extends JpaRepository<WorkRequest, Long> 
 
     @Query(value = "SELECT COUNT(*) FROM work_requests WHERE client_id = :clientId AND status = :status AND is_deleted = false", nativeQuery = true)
     long countByClientAndStatusNative(@Param("clientId") Long clientId, @Param("status") String status);
+
+    org.springframework.data.domain.Page<WorkRequest> findByStatusOrderByCreatedAtDesc(WorkStatus status, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<WorkRequest> findAllByOrderByCreatedAtDesc(org.springframework.data.domain.Pageable pageable);
 }

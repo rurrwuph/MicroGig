@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useToast } from './Toast';
@@ -43,7 +43,6 @@ const formatDate = (d) => {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-// Helper to render interactive or read-only star ratings
 const StarRating = ({ rating, onChange, readOnly = false }) => {
   const stars = [1, 2, 3, 4, 5];
   return (
@@ -75,15 +74,18 @@ const MyAssignments = ({ user, setUser }) => {
 
   // Data states
   const [myAssignments, setMyAssignments] = useState([]);
+  const [myApplications, setMyApplications] = useState([]);
   const [clientJobs, setClientJobs] = useState([]);
   const [clientAssignments, setClientAssignments] = useState([]);
+  const [applicationsMap, setApplicationsMap] = useState({});
+  const [expandedJobId, setExpandedJobId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('ALL');
 
   // ── Modal States ──
   // 1. Deliverable Submission Pipeline (Freelancer)
   const [submitModalAssignment, setSubmitModalAssignment] = useState(null);
-  const [submitStep, setSubmitStep] = useState(1); // 1 = Form, 2 = Preview
+  const [submitStep, setSubmitStep] = useState(1);
   const [submitForm, setSubmitForm] = useState({ notes: '', url: '' });
   const [checklist, setChecklist] = useState({ testsPass: false, requirementsMet: false, cleanCode: false });
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -117,29 +119,49 @@ const MyAssignments = ({ user, setUser }) => {
   const [appealNotes, setAppealNotes] = useState('');
   const [appealLoading, setAppealLoading] = useState(false);
 
-  useEffect(() => { fetchData(); }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       if (isFreelancer) {
-        const res = await api.get('/assignments/my');
-        setMyAssignments(res.data || []);
+        const [assignRes, appsRes] = await Promise.all([
+          api.get('/assignments/my'),
+          api.get('/applications/my').catch(() => ({ data: [] }))
+        ]);
+        setMyAssignments(assignRes.data || []);
+        setMyApplications(appsRes.data || []);
       }
       if (isClient) {
         const [jobsRes, assignRes] = await Promise.all([
           api.get('/work/my'),
           api.get('/assignments/client')
         ]);
-        setClientJobs(jobsRes.data || []);
+        const jobs = jobsRes.data || [];
+        setClientJobs(jobs);
         setClientAssignments(assignRes.data || []);
+
+        // Fetch applications for open jobs
+        const openJobs = jobs.filter(j => j.status === 'OPEN');
+        const appsData = {};
+        await Promise.all(
+          openJobs.map(async (j) => {
+            try {
+              const res = await api.get(`/work/${j.id}/applications`);
+              appsData[j.id] = res.data || [];
+            } catch { /* ignore */ }
+          })
+        );
+        setApplicationsMap(appsData);
       }
     } catch {
       toast.error('Failed to load project data.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [isClient, isFreelancer]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const refreshUserData = async () => {
     try {
@@ -150,6 +172,44 @@ const MyAssignments = ({ user, setUser }) => {
         if (setUser) setUser(updated);
       }
     } catch { /* non-critical */ }
+  };
+
+  /* ── CLIENT: Applications Management ── */
+  const toggleJobApplications = async (jobId) => {
+    if (expandedJobId === jobId) {
+      setExpandedJobId(null);
+      return;
+    }
+    setExpandedJobId(jobId);
+    if (!applicationsMap[jobId]) {
+      try {
+        const res = await api.get(`/work/${jobId}/applications`);
+        setApplicationsMap(prev => ({ ...prev, [jobId]: res.data || [] }));
+      } catch {
+        toast.error('Failed to load applications.');
+      }
+    }
+  };
+
+  const handleAcceptApp = async (jobId, appId) => {
+    try {
+      await api.post(`/work/${jobId}/applications/${appId}/accept`);
+      toast.success('Proposal accepted! Freelancer is now assigned and active.');
+      fetchData();
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data || 'Failed to accept proposal.';
+      toast.error(typeof msg === 'string' ? msg : 'Action failed.');
+    }
+  };
+
+  const handleRejectApp = async (jobId, appId) => {
+    try {
+      await api.post(`/work/${jobId}/applications/${appId}/reject`);
+      toast.success('Proposal declined.');
+      fetchData();
+    } catch (err) {
+      toast.error('Failed to decline proposal.');
+    }
   };
 
   /* ── FREELANCER: Open Submit Deliverables Modal ── */
@@ -166,11 +226,11 @@ const MyAssignments = ({ user, setUser }) => {
   const handleSubmitDeliverable = async (e) => {
     e.preventDefault();
     if (!submitForm.url.trim()) {
-      toast.error('Please provide a submission URL (e.g. GitHub repo, Figma link, Live demo).');
+      toast.error('Please provide a submission URL.');
       return;
     }
     if (!submitForm.notes.trim()) {
-      toast.error('Please provide notes describing your deliverables.');
+      toast.error('Please provide submission notes.');
       return;
     }
 
@@ -180,7 +240,7 @@ const MyAssignments = ({ user, setUser }) => {
         submissionNotes: submitForm.notes.trim(),
         submissionUrl: submitForm.url.trim(),
       });
-      toast.success('Deliverables submitted successfully! The client has been notified to review.');
+      toast.success('Deliverables submitted successfully! The client has been notified.');
       setSubmitModalAssignment(null);
       fetchData();
     } catch (err) {
@@ -199,28 +259,25 @@ const MyAssignments = ({ user, setUser }) => {
 
   const handleFreelancerCancel = async (e) => {
     e.preventDefault();
-    if (!cancelReason.trim() || cancelReason.trim().length < 5) {
-      toast.error('Please provide a valid cancellation reason (minimum 5 characters).');
+    if (!cancelReason.trim()) {
+      toast.error('Please provide a reason for cancelling.');
       return;
     }
-
     setCancelLoading(true);
     try {
       const res = await api.post(`/assignments/${cancelModalAssignment.workRequest.id}/cancel`, {
         reason: cancelReason.trim(),
       });
-
       if (res.data?.compensated) {
-        toast.success(`Assignment cancelled. You received $${Number(res.data.compensationAmount).toFixed(2)} (0.1%) compensation!`);
+        toast.success(`Assignment cancelled. You received $${Number(res.data.compensationAmount).toFixed(2)} (0.1% compensation) because the scope was modified <5m ago.`);
       } else {
-        toast.success('Assignment cancelled successfully.');
+        toast.success('Assignment cancelled. The job is now available on the marketplace.');
       }
-
       setCancelModalAssignment(null);
       fetchData();
       refreshUserData();
     } catch (err) {
-      const msg = err.response?.data || 'Failed to cancel assignment.';
+      const msg = err.response?.data?.message || err.response?.data || 'Cancellation failed.';
       toast.error(typeof msg === 'string' ? msg : 'Cancellation failed.');
     } finally {
       setCancelLoading(false);
@@ -233,10 +290,10 @@ const MyAssignments = ({ user, setUser }) => {
     setEditForm({
       title: job.title || '',
       description: job.description || '',
-      category: job.category || 'Web Development',
+      category: job.category || '',
       skills: job.skills || '',
       amount: job.amount || '',
-      deadline: job.deadline ? job.deadline.slice(0, 16) : '',
+      deadline: job.deadline ? job.deadline.split('T')[0] : '',
     });
   };
 
@@ -373,7 +430,6 @@ const MyAssignments = ({ user, setUser }) => {
     }
   };
 
-  // Helper to check if a job was modified within 5 minutes
   const isModifiedWithin5Min = (lastModifiedAt) => {
     if (!lastModifiedAt) return false;
     const diff = (new Date() - new Date(lastModifiedAt)) / 1000 / 60;
@@ -386,12 +442,12 @@ const MyAssignments = ({ user, setUser }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '1.85rem', fontWeight: 800 }}>
-            {isClient ? 'My Job Posts & Assignments' : 'My Work & Assignments'}
+            {isClient ? 'My Job Posts & Candidate Applications' : 'My Work, Applications & Assignments'}
           </h1>
           <p style={{ color: 'var(--clr-text-2)', fontSize: '0.875rem', marginTop: '0.2rem' }}>
             {isClient
-              ? 'Manage your posted gigs, review submissions, request revisions, and release payouts.'
-              : 'Track accepted gigs, submit deliverables, and communicate with clients.'
+              ? 'Review freelancer applications, accept proposals, manage active deliverables, and release escrow.'
+              : 'Track submitted proposals, active deliverables, and client revision requests.'
             }
           </p>
         </div>
@@ -403,7 +459,7 @@ const MyAssignments = ({ user, setUser }) => {
         )}
       </div>
 
-      {/* ── CLIENT VIEW: Posted Jobs Management ── */}
+      {/* ── CLIENT VIEW: Posted Jobs & Candidate Applications ── */}
       {isClient && (
         <div style={{ marginBottom: '3rem' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -423,7 +479,7 @@ const MyAssignments = ({ user, setUser }) => {
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2.5rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '2.5rem' }}>
               {clientJobs.map((job) => {
                 const isAssigned = job.status === 'ASSIGNED';
                 const isOpen = job.status === 'OPEN';
@@ -432,8 +488,8 @@ const MyAssignments = ({ user, setUser }) => {
                 const isDone = job.status === 'COMPLETED';
                 const isCancelled = job.status === 'CANCELLED';
 
-                // Find corresponding assignment if any
                 const assignment = clientAssignments.find(a => a.workRequest?.id === job.id);
+                const jobApps = applicationsMap[job.id] || [];
 
                 return (
                   <div key={job.id} className="assignment-card">
@@ -442,6 +498,11 @@ const MyAssignments = ({ user, setUser }) => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
                           <span className={`badge ${badgeClass(job.status)}`}>{job.status}</span>
                           {job.category && <span className="category-badge">{job.category}</span>}
+                          {isOpen && jobApps.length > 0 && (
+                            <span className="badge badge-open" style={{ fontSize: '0.72rem' }}>
+                              ⚡ {jobApps.length} Candidate Proposal{jobApps.length > 1 ? 's' : ''}
+                            </span>
+                          )}
                           {job.lastModifiedAt && (
                             <span style={{ fontSize: '0.72rem', color: 'var(--clr-accent)', fontWeight: 600 }}>
                               Modified {formatDate(job.lastModifiedAt)}
@@ -521,7 +582,7 @@ const MyAssignments = ({ user, setUser }) => {
                     </div>
 
                     {/* Metadata & Assigned Freelancer */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid var(--clr-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid var(--clr-border)', marginTop: '0.5rem' }}>
                       <div style={{ fontSize: '0.8rem', color: 'var(--clr-text-2)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
                         {assignment?.freelancer ? (
                           <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -532,7 +593,7 @@ const MyAssignments = ({ user, setUser }) => {
                           </span>
                         ) : (
                           <span style={{ color: 'var(--clr-text-3)' }}>
-                            {isOpen ? 'Awaiting freelancer acceptance' : isCancelled ? 'Post cancelled' : 'No freelancer assigned'}
+                            {isOpen ? `${jobApps.length} candidate proposal${jobApps.length !== 1 ? 's' : ''}` : isCancelled ? 'Post cancelled' : 'No freelancer assigned'}
                           </span>
                         )}
                         <span>Posted: {formatDate(job.createdAt)}</span>
@@ -540,9 +601,14 @@ const MyAssignments = ({ user, setUser }) => {
 
                       {/* Action Buttons */}
                       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        {/* OPEN: Edit or Cancel */}
                         {isOpen && (
                           <>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => toggleJobApplications(job.id)}
+                            >
+                              {expandedJobId === job.id ? '▲ Hide Proposals' : `▼ Review Proposals (${jobApps.length})`}
+                            </button>
                             <button
                               className="btn btn-secondary btn-sm"
                               onClick={() => handleOpenEditJob(job)}
@@ -555,12 +621,11 @@ const MyAssignments = ({ user, setUser }) => {
                               onClick={() => handleOpenCancelJob(job)}
                               style={{ color: 'var(--clr-error)', borderColor: 'rgba(239,68,68,0.3)' }}
                             >
-                              <IconTrash size={13} /> Cancel Post
+                              <IconTrash size={13} /> Cancel
                             </button>
                           </>
                         )}
 
-                        {/* ASSIGNED: Modify Scope */}
                         {isAssigned && (
                           <button
                             className="btn btn-secondary btn-sm"
@@ -572,6 +637,75 @@ const MyAssignments = ({ user, setUser }) => {
                         )}
                       </div>
                     </div>
+
+                    {/* OPEN JOB: Expandable Candidate Applications Drawer */}
+                    {isOpen && expandedJobId === job.id && (
+                      <div style={{ marginTop: '1rem', background: 'var(--clr-surface-2)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-md)', padding: '1rem' }}>
+                        <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--clr-text)' }}>
+                          Candidate Proposals for "{job.title}" ({jobApps.length})
+                        </h4>
+
+                        {jobApps.length === 0 ? (
+                          <p style={{ fontSize: '0.825rem', color: 'var(--clr-text-3)', margin: 0 }}>
+                            No candidate proposals received yet. Freelancers browsing the marketplace will appear here.
+                          </p>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {jobApps.map(app => (
+                              <div key={app.id} style={{ background: 'var(--clr-surface-1)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-sm)', padding: '0.85rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                  <div>
+                                    <strong style={{ color: 'var(--clr-primary)', cursor: 'pointer', fontSize: '0.9rem' }} onClick={() => navigate(`/user/${app.freelancerUsername}`)}>
+                                      @{app.freelancerUsername}
+                                    </strong>
+                                    <span style={{ fontSize: '0.78rem', color: 'var(--clr-text-3)', marginLeft: '6px' }}>
+                                      ({app.freelancerFullName || 'Freelancer'})
+                                    </span>
+                                    <p style={{ fontSize: '0.825rem', color: 'var(--clr-text-2)', marginTop: '0.35rem', lineHeight: 1.4 }}>
+                                      "{app.proposalNotes}"
+                                    </p>
+                                  </div>
+
+                                  <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--clr-success)' }}>
+                                      ${Number(app.bidAmount).toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)' }}>
+                                      Est. {app.estimatedDays} day{app.estimatedDays > 1 ? 's' : ''}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.65rem', paddingTop: '0.5rem', borderTop: '1px solid var(--clr-border)' }}>
+                                  <span className={`badge ${app.status === 'PENDING' ? 'badge-open' : app.status === 'ACCEPTED' ? 'badge-completed' : 'badge-expired'}`} style={{ fontSize: '0.7rem' }}>
+                                    {app.status}
+                                  </span>
+
+                                  {app.status === 'PENDING' && (
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                      <button
+                                        className="btn btn-ghost btn-sm"
+                                        style={{ color: 'var(--clr-error)', fontSize: '0.75rem', padding: '4px 10px' }}
+                                        onClick={() => handleRejectApp(job.id, app.id)}
+                                      >
+                                        Decline
+                                      </button>
+                                      <button
+                                        className="btn btn-success btn-sm"
+                                        style={{ fontSize: '0.75rem', padding: '4px 12px' }}
+                                        onClick={() => handleAcceptApp(job.id, app.id)}
+                                      >
+                                        ✓ Accept & Assign Freelancer
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Deliverables Section if Freelancer submitted (DONE) */}
                     {assignment && assignment.status === 'DONE' && (
@@ -605,7 +739,6 @@ const MyAssignments = ({ user, setUser }) => {
                           </p>
                         )}
 
-                        {/* Client Actions: Revision vs Pay */}
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                           <button
                             className="btn btn-warning btn-sm"
@@ -630,9 +763,59 @@ const MyAssignments = ({ user, setUser }) => {
         </div>
       )}
 
-      {/* ── FREELANCER VIEW: Assigned Gigs ── */}
+      {/* ── FREELANCER VIEW: Applications & Assigned Gigs ── */}
       {isFreelancer && (
         <div>
+          {/* Submitted Applications Section */}
+          <div style={{ marginBottom: '2.5rem' }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <IconSend size={18} style={{ color: 'var(--clr-primary)' }} />
+              My Submitted Proposals & Applications ({myApplications.length})
+            </h2>
+
+            {myApplications.length === 0 ? (
+              <div className="empty-state" style={{ padding: '2rem 1rem', marginBottom: '2rem' }}>
+                <p style={{ margin: 0, color: 'var(--clr-text-3)', fontSize: '0.85rem' }}>You haven't submitted any proposals yet. Browse jobs to submit bids.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
+                {myApplications.map(app => (
+                  <div key={app.id} className="assignment-card" style={{ padding: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.35rem' }}>
+                          <span className={`badge ${app.status === 'PENDING' ? 'badge-open' : app.status === 'ACCEPTED' ? 'badge-completed' : 'badge-expired'}`}>
+                            {app.status}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)' }}>Applied {formatDate(app.appliedAt)}</span>
+                        </div>
+                        <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>{app.workRequestTitle}</h4>
+                        <p style={{ fontSize: '0.825rem', color: 'var(--clr-text-2)', marginTop: '0.25rem' }}>
+                          <strong>Your Proposal:</strong> "{app.proposalNotes}"
+                        </p>
+                      </div>
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--clr-primary)' }}>
+                          ${Number(app.bidAmount).toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)' }}>
+                          Est. Timeline: {app.estimatedDays} days
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Active Assigned Gigs */}
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <IconBriefcase size={18} style={{ color: 'var(--clr-primary)' }} />
+            Active Assignments & Projects ({myAssignments.length})
+          </h2>
+
           {/* Status Filter Chips */}
           <div className="filter-chips" style={{ marginBottom: '1.5rem' }}>
             {['ALL', 'ACCEPTED', 'DONE', 'REVISION_REQUESTED', 'COMPLETED'].map((f) => (
@@ -651,7 +834,7 @@ const MyAssignments = ({ user, setUser }) => {
           ) : myAssignments.length === 0 ? (
             <div className="empty-state">
               <IconBriefcase size={48} style={{ opacity: 0.5, marginBottom: '0.5rem' }} />
-              <h3>No assignments yet</h3>
+              <h3>No active assignments yet</h3>
               <p>Explore the job board to find tasks that match your skills.</p>
               <button className="btn btn-primary btn-sm" onClick={() => navigate('/jobs')}>
                 Find Work
@@ -695,7 +878,7 @@ const MyAssignments = ({ user, setUser }) => {
                       </div>
 
                       {/* Client Info & Accepted Date */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--clr-border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--clr-border)', marginTop: '0.5rem' }}>
                         <div style={{ fontSize: '0.8rem', color: 'var(--clr-text-2)' }}>
                           Client: <strong style={{ color: 'var(--clr-primary)', cursor: 'pointer' }} onClick={() => navigate(`/user/${req.client?.username}`)}>
                             @{req.client?.username}
@@ -726,40 +909,27 @@ const MyAssignments = ({ user, setUser }) => {
                           )}
 
                           {a.status === 'DONE' && (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--clr-text-3)', fontStyle: 'italic' }}>
-                              Deliverables submitted • Awaiting client payment release
+                            <span style={{ fontSize: '0.8rem', color: 'var(--clr-accent)', fontWeight: 600 }}>
+                              ✓ Deliverables Submitted — Awaiting Client Approval
                             </span>
                           )}
 
-                          {a.status === 'COMPLETED' && a.rating && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <StarRating rating={a.rating} readOnly />
-                              <span style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)' }}>({a.rating}/5)</span>
-                            </div>
+                          {a.status === 'COMPLETED' && (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--clr-success)', fontWeight: 600 }}>
+                              ★ Payment Settled & Completed
+                            </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Revision Feedback alert if requested */}
+                      {/* Revision Feedback alert */}
                       {a.status === 'REVISION_REQUESTED' && a.feedback && (
-                        <div style={{ background: 'rgba(250, 204, 21, 0.1)', border: '1px solid rgba(250, 204, 21, 0.3)', padding: '0.85rem', borderRadius: 'var(--r-md)', marginTop: '0.5rem' }}>
-                          <strong style={{ color: 'var(--clr-warning)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 'var(--r-md)', padding: '0.75rem 1rem', marginTop: '0.75rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--clr-warning)', fontWeight: 700, fontSize: '0.85rem' }}>
                             <IconAlert size={14} /> Client Requested Changes (Revision #{a.revisionCount || 1}):
-                          </strong>
-                          <p style={{ fontSize: '0.85rem', color: 'var(--clr-text)', marginTop: '0.25rem' }}>
+                          </div>
+                          <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--clr-text-2)' }}>
                             {a.feedback}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Cancellation Reason alert if cancelled */}
-                      {a.status === 'CANCELLED_BY_FREELANCER' && a.cancellationReason && (
-                        <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', padding: '0.75rem', borderRadius: 'var(--r-md)', marginTop: '0.5rem' }}>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--clr-error)', fontWeight: 600 }}>
-                            Cancellation Reason:
-                          </span>
-                          <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginTop: '0.2rem' }}>
-                            {a.cancellationReason}
                           </p>
                         </div>
                       )}
@@ -771,14 +941,10 @@ const MyAssignments = ({ user, setUser }) => {
         </div>
       )}
 
-      {/* =========================================================================
-          MODALS
-          ========================================================================= */}
-
-      {/* 1. FREELANCER: Deliverable Submission Pipeline Modal */}
+      {/* 1. FREELANCER: Submit Deliverable Modal */}
       {submitModalAssignment && (
         <div className="modal-overlay" onClick={() => setSubmitModalAssignment(null)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Submit Work Deliverables</h3>
               <button className="modal-close-btn" onClick={() => setSubmitModalAssignment(null)}>
@@ -786,118 +952,50 @@ const MyAssignments = ({ user, setUser }) => {
               </button>
             </div>
 
-            {submitStep === 1 ? (
-              <form onSubmit={(e) => { e.preventDefault(); setSubmitStep(2); }}>
-                <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginBottom: '1.25rem' }}>
-                  Provide your completed work URL, codebase link, or live project along with implementation notes.
-                </p>
-
-                <div className="form-group">
-                  <label className="form-label">Deliverable URL (GitHub / Demo / Drive) *</label>
-                  <input
-                    type="url"
-                    className="form-input"
-                    placeholder="https://github.com/... or https://mydemo.app"
-                    value={submitForm.url}
-                    onChange={e => setSubmitForm(f => ({ ...f, url: e.target.value }))}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Submission Notes & Completion Details *</label>
-                  <textarea
-                    className="form-input"
-                    rows={4}
-                    placeholder="Describe what has been implemented, how to run/test the project, and any special instructions…"
-                    value={submitForm.notes}
-                    onChange={e => setSubmitForm(f => ({ ...f, notes: e.target.value }))}
-                    required
-                  />
-                </div>
-
-                <div style={{ background: 'var(--clr-surface-2)', padding: '1rem', borderRadius: 'var(--r-md)', marginBottom: '1.25rem', border: '1px solid var(--clr-border)' }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--clr-text-2)', marginBottom: '0.5rem' }}>
-                    Deliverable Verification Checklist
-                  </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', marginBottom: '0.4rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={checklist.requirementsMet}
-                      onChange={e => setChecklist(c => ({ ...c, requirementsMet: e.target.checked }))}
-                    />
-                    All job requirements and specifications are met
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', marginBottom: '0.4rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={checklist.testsPass}
-                      onChange={e => setChecklist(c => ({ ...c, testsPass: e.target.checked }))}
-                    />
-                    Code builds without errors and tested
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={checklist.cleanCode}
-                      onChange={e => setChecklist(c => ({ ...c, cleanCode: e.target.checked }))}
-                    />
-                    Clear documentation & comments included
-                  </label>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => setSubmitModalAssignment(null)}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-primary" disabled={!submitForm.url || !submitForm.notes}>
-                    Review & Preview →
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div>
-                <div style={{ background: 'var(--clr-surface-2)', padding: '1.25rem', borderRadius: 'var(--r-md)', marginBottom: '1.5rem', border: '1px solid var(--clr-border)' }}>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--clr-primary)' }}>
-                    Submission Preview for: {submitModalAssignment.workRequest?.title}
-                  </h4>
-                  <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                    <strong>Deliverable Link: </strong>
-                    <a href={submitForm.url} target="_blank" rel="noreferrer" style={{ color: 'var(--clr-primary)', textDecoration: 'underline' }}>
-                      {submitForm.url}
-                    </a>
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', whiteSpace: 'pre-wrap' }}>
-                    <strong>Notes:</strong>
-                    <p style={{ marginTop: '0.25rem' }}>{submitForm.notes}</p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setSubmitStep(1)}>
-                    ← Back to Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-success"
-                    disabled={submitLoading}
-                    onClick={handleSubmitDeliverable}
-                  >
-                    {submitLoading ? <><span className="spinner" /> Submitting…</> : 'Confirm Final Submission'}
-                  </button>
-                </div>
+            <form onSubmit={handleSubmitDeliverable}>
+              <div className="form-group">
+                <label className="form-label">Deliverable URL *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="https://github.com/user/project or Figma / Demo link"
+                  value={submitForm.url}
+                  onChange={e => setSubmitForm(f => ({ ...f, url: e.target.value }))}
+                  required
+                />
               </div>
-            )}
+
+              <div className="form-group">
+                <label className="form-label">Submission Notes & Instructions *</label>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  placeholder="Describe your solution, test coverage, and deployment instructions…"
+                  value={submitForm.notes}
+                  onChange={e => setSubmitForm(f => ({ ...f, notes: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setSubmitModalAssignment(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={submitLoading}>
+                  {submitLoading ? <><span className="spinner" /> Submitting…</> : 'Submit Deliverable'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* 2. FREELANCER: Cancellation with Compensation Modal */}
+      {/* 2. FREELANCER: Cancellation Modal */}
       {cancelModalAssignment && (
         <div className="modal-overlay" onClick={() => setCancelModalAssignment(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 style={{ color: 'var(--clr-error)' }}>Cancel Assignment</h3>
+              <h3>Cancel Assignment</h3>
               <button className="modal-close-btn" onClick={() => setCancelModalAssignment(null)}>
                 <IconClose size={16} />
               </button>
@@ -905,31 +1003,15 @@ const MyAssignments = ({ user, setUser }) => {
 
             <form onSubmit={handleFreelancerCancel}>
               <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginBottom: '1rem' }}>
-                Are you sure you want to cancel your assignment for <strong>"{cancelModalAssignment.workRequest?.title}"</strong>?
+                Are you sure you want to cancel your assignment for "<strong>{cancelModalAssignment.workRequest?.title}</strong>"?
               </p>
 
-              {/* Notice if modified within 5 minutes */}
-              {isModifiedWithin5Min(cancelModalAssignment.workRequest?.lastModifiedAt) ? (
-                <div style={{ background: 'rgba(82, 183, 136, 0.12)', border: '1px solid rgba(82, 183, 136, 0.35)', padding: '0.85rem', borderRadius: 'var(--r-md)', marginBottom: '1rem' }}>
-                  <strong style={{ color: 'var(--clr-primary)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <IconCheck size={15} /> 0.1% Compensation Qualified!
-                  </strong>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--clr-text-2)', marginTop: '0.25rem' }}>
-                    Because the client modified this post within the last 5 minutes, you will receive <strong>${(Number(cancelModalAssignment.workRequest?.amount || 0) * 0.001).toFixed(2)}</strong> (0.1% of budget) credited directly to your wallet upon cancellation.
-                  </p>
-                </div>
-              ) : (
-                <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', padding: '0.75rem', borderRadius: 'var(--r-md)', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--clr-text-2)' }}>
-                  Please provide a valid cancellation reason. The job will be reopened for other freelancers.
-                </div>
-              )}
-
               <div className="form-group">
-                <label className="form-label">Cancellation Reason *</label>
+                <label className="form-label">Reason for Cancellation *</label>
                 <textarea
                   className="form-input"
                   rows={3}
-                  placeholder="Explain why you are unable to complete or continue this gig…"
+                  placeholder="Explain why you cannot complete this assignment…"
                   value={cancelReason}
                   onChange={e => setCancelReason(e.target.value)}
                   required
@@ -938,14 +1020,9 @@ const MyAssignments = ({ user, setUser }) => {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setCancelModalAssignment(null)}>
-                  Keep Assignment
+                  Back
                 </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ background: 'var(--clr-error)', color: '#fff' }}
-                  disabled={cancelLoading || cancelReason.trim().length < 5}
-                >
+                <button type="submit" className="btn btn-danger" disabled={cancelLoading || !cancelReason.trim()}>
                   {cancelLoading ? <><span className="spinner" /> Cancelling…</> : 'Confirm Cancellation'}
                 </button>
               </div>
@@ -957,21 +1034,15 @@ const MyAssignments = ({ user, setUser }) => {
       {/* 3. CLIENT: Edit Post Modal */}
       {editJobModal && (
         <div className="modal-overlay" onClick={() => setEditJobModal(null)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Edit Job Details</h3>
+              <h3>{editJobModal.status === 'ASSIGNED' ? 'Modify Job Scope' : 'Edit Job Post'}</h3>
               <button className="modal-close-btn" onClick={() => setEditJobModal(null)}>
                 <IconClose size={16} />
               </button>
             </div>
 
             <form onSubmit={handleSaveEditJob}>
-              {editJobModal.status === 'ASSIGNED' && (
-                <div style={{ background: 'rgba(250, 204, 21, 0.1)', border: '1px solid rgba(250, 204, 21, 0.3)', padding: '0.75rem', borderRadius: 'var(--r-md)', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--clr-text-2)' }}>
-                  <strong style={{ color: 'var(--clr-warning)' }}>Notice:</strong> This job is already assigned to a freelancer. Modifying scope/details will notify the freelancer and allow them a 5-minute cancellation window with 0.1% compensation.
-                </div>
-              )}
-
               <div className="form-group">
                 <label className="form-label">Job Title *</label>
                 <input
@@ -996,7 +1067,7 @@ const MyAssignments = ({ user, setUser }) => {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div className="form-group">
-                  <label className="form-label">Budget ($ USD) *</label>
+                  <label className="form-label">Budget ($) *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1009,40 +1080,22 @@ const MyAssignments = ({ user, setUser }) => {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Category</label>
-                  <select
+                  <label className="form-label">Deadline</label>
+                  <input
+                    type="date"
                     className="form-input"
-                    value={editForm.category}
-                    onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
-                  >
-                    <option value="Web Development">Web Development</option>
-                    <option value="Mobile Apps">Mobile Apps</option>
-                    <option value="UI/UX & Graphic Design">UI/UX & Graphic Design</option>
-                    <option value="Bug Fixes & DevOps">Bug Fixes & DevOps</option>
-                    <option value="Data Science & AI">Data Science & AI</option>
-                    <option value="Writing & Translation">Writing & Translation</option>
-                    <option value="Other">Other</option>
-                  </select>
+                    value={editForm.deadline}
+                    onChange={e => setEditForm(f => ({ ...f, deadline: e.target.value }))}
+                  />
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Required Skills (Comma separated)</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="React, Spring Boot, Postgres..."
-                  value={editForm.skills}
-                  onChange={e => setEditForm(f => ({ ...f, skills: e.target.value }))}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setEditJobModal(null)}>
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={editLoading}>
-                  {editLoading ? <><span className="spinner" /> Saving…</> : 'Save Changes'}
+                  {editLoading ? <><span className="spinner" /> Saving…</> : 'Save & Publish'}
                 </button>
               </div>
             </form>
@@ -1050,40 +1103,34 @@ const MyAssignments = ({ user, setUser }) => {
         </div>
       )}
 
-      {/* 4. CLIENT: Cancel Post Confirmation Modal */}
+      {/* 4. CLIENT: Cancel Post Modal */}
       {cancelJobModal && (
         <div className="modal-overlay" onClick={() => setCancelJobModal(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 style={{ color: 'var(--clr-error)' }}>Cancel Job Post</h3>
+              <h3>Cancel Job Post</h3>
               <button className="modal-close-btn" onClick={() => setCancelJobModal(null)}>
                 <IconClose size={16} />
               </button>
             </div>
 
-            <p style={{ fontSize: '0.9rem', color: 'var(--clr-text-2)', marginBottom: '1.5rem' }}>
-              Are you sure you want to cancel the job post <strong>"{cancelJobModal.title}"</strong>? It will no longer be visible on the public job board.
+            <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginBottom: '1.25rem' }}>
+              Are you sure you want to cancel the job post "<strong>{cancelJobModal.title}</strong>"? Your deposited escrow funds of <strong>${Number(cancelJobModal.amount).toFixed(2)}</strong> will be returned to your wallet.
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
               <button type="button" className="btn btn-ghost" onClick={() => setCancelJobModal(null)}>
                 Keep Post
               </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ background: 'var(--clr-error)', color: '#fff' }}
-                disabled={cancelJobLoading}
-                onClick={handleConfirmCancelJob}
-              >
-                {cancelJobLoading ? <><span className="spinner" /> Cancelling…</> : 'Yes, Cancel Post'}
+              <button type="button" className="btn btn-danger" onClick={handleConfirmCancelJob} disabled={cancelJobLoading}>
+                {cancelJobLoading ? <><span className="spinner" /> Cancelling…</> : 'Confirm Cancel & Refund'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 5. CLIENT: Request Revision Modal */}
+      {/* 5. CLIENT: Revision Modal */}
       {revisionModalAssignment && (
         <div className="modal-overlay" onClick={() => setRevisionModalAssignment(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -1095,16 +1142,12 @@ const MyAssignments = ({ user, setUser }) => {
             </div>
 
             <form onSubmit={handleSubmitRevision}>
-              <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginBottom: '1rem' }}>
-                Please provide clear instructions for the freelancer on what adjustments or corrections are needed.
-              </p>
-
               <div className="form-group">
-                <label className="form-label">Revision Feedback *</label>
+                <label className="form-label">Revision Instructions *</label>
                 <textarea
                   className="form-input"
                   rows={4}
-                  placeholder="Detail the specific changes required before approving payment…"
+                  placeholder="Detail the changes required before releasing escrow payment…"
                   value={revisionFeedback}
                   onChange={e => setRevisionFeedback(e.target.value)}
                   required
@@ -1116,7 +1159,7 @@ const MyAssignments = ({ user, setUser }) => {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-warning" disabled={revisionLoading || !revisionFeedback.trim()}>
-                  {revisionLoading ? <><span className="spinner" /> Sending…</> : 'Submit Revision Request'}
+                  {revisionLoading ? <><span className="spinner" /> Sending…</> : 'Send Revision Request'}
                 </button>
               </div>
             </form>
@@ -1129,14 +1172,13 @@ const MyAssignments = ({ user, setUser }) => {
         <div className="modal-overlay" onClick={() => setPayModalAssignment(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Release Payment & Review</h3>
+              <h3>Release Payment & Rate</h3>
               <button className="modal-close-btn" onClick={() => setPayModalAssignment(null)}>
                 <IconClose size={16} />
               </button>
             </div>
 
             <form onSubmit={handlePay}>
-              {/* Payment Summary */}
               <div style={{ background: 'var(--clr-surface-2)', padding: '1rem', borderRadius: 'var(--r-md)', marginBottom: '1.25rem', border: '1px solid var(--clr-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
                   <span>Total Job Budget:</span>

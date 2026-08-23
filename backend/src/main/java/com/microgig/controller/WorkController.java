@@ -22,6 +22,7 @@ import java.util.List;
 public class WorkController {
 
     private final WorkService workService;
+    private final com.microgig.service.LiveStatsService liveStatsService;
 
     /**
      * GET /api/work
@@ -35,11 +36,28 @@ public class WorkController {
 
     /**
      * GET /api/work/{id}
-     * Returns a specific work request by ID.
+     * Returns a specific work request by ID and records live view.
      */
     @GetMapping("/{id}")
-    public ResponseEntity<WorkResponse> getWorkById(@PathVariable Long id) {
+    public ResponseEntity<WorkResponse> getWorkById(@PathVariable Long id,
+                                                    @AuthenticationPrincipal UserDetailsImpl userDetails) {
         WorkResponse response = workService.getWorkById(id);
+        String viewer = userDetails != null ? "user:" + userDetails.getId() : "anon:" + System.currentTimeMillis();
+        liveStatsService.recordJobView(id, viewer);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /api/work/{id}/live-stats
+     * Returns active viewers in last 60s and total unique viewers.
+     */
+    @GetMapping("/{id}/live-stats")
+    public ResponseEntity<com.microgig.payload.response.LiveStatsResponse> getLiveStats(@PathVariable Long id,
+                                                                                        @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        if (userDetails != null) {
+            liveStatsService.recordJobView(id, "user:" + userDetails.getId());
+        }
+        com.microgig.payload.response.LiveStatsResponse response = liveStatsService.getLiveStats(id);
         return ResponseEntity.ok(response);
     }
 

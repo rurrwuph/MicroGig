@@ -118,4 +118,28 @@ public final class EntityDtoMapper {
                 .createdAt(notification.getCreatedAt())
                 .build();
     }
+
+    public static WorkApplicationResponse toWorkApplicationResponse(WorkApplication application) {
+        if (application == null) return null;
+        User freelancer = application.getFreelancer();
+        WorkRequest req = application.getWorkRequest();
+
+        return WorkApplicationResponse.builder()
+                .id(application.getId())
+                .workRequestId(req != null ? req.getId() : null)
+                .workRequestTitle(req != null ? req.getTitle() : "")
+                .workRequestAmount(req != null ? req.getAmount() : null)
+                .workRequestStatus(req != null && req.getStatus() != null ? req.getStatus().name() : null)
+                .freelancerId(freelancer != null ? freelancer.getId() : null)
+                .freelancerUsername(freelancer != null ? freelancer.getUsername() : "")
+                .freelancerFullName(freelancer != null && freelancer.getFullName() != null ? freelancer.getFullName() : "")
+                .proposalNotes(application.getProposalNotes())
+                .bidAmount(application.getBidAmount())
+                .estimatedDays(application.getEstimatedDays())
+                .status(application.getStatus())
+                .appliedAt(application.getAppliedAt())
+                .decidedAt(application.getDecidedAt())
+                .build();
+    }
 }
+

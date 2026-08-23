@@ -33,6 +33,7 @@ public class AssignmentServiceImpl implements AssignmentService {
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
     private final NotificationRepository notificationRepository;
+    private final com.microgig.service.LeaderboardService leaderboardService;
 
     @Value("${microgig.cancellation-grace-minutes:5}")
     private int cancellationGraceMinutes;
@@ -373,6 +374,16 @@ public class AssignmentServiceImpl implements AssignmentService {
         userRepository.save(freelancer);
         transactionRepository.save(debit);
         transactionRepository.save(payment);
+
+        // Update Redis Leaderboard stats in real-time
+        try {
+            leaderboardService.recordCompletedGig(freelancer.getUsername());
+            if (payRequest != null && payRequest.getRating() != null) {
+                leaderboardService.recordRating(freelancer.getUsername(), (double) payRequest.getRating());
+            }
+        } catch (Exception e) {
+            // non-critical
+        }
 
         Notification notif = Notification.builder()
                 .user(freelancer)
