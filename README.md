@@ -16,8 +16,6 @@ docker compose up --build -d
 - **Backend API & Swagger:** [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
 - **pgAdmin Database UI:** [http://localhost:5050](http://localhost:5050)
 
-For full instructions, demo account credentials, and troubleshooting, see [**DOCKER_INSTRUCTIONS.md**](./DOCKER_INSTRUCTIONS.md).
-
 ---
 
 ## 👥 Demo Logins
@@ -30,8 +28,6 @@ For full instructions, demo account credentials, and troubleshooting, see [**DOC
 | **Freelancer** | `dev_john` | `password123` | React Specialist (5.0 rating, $3,450 balance) |
 | **Freelancer** | `emma_cloud` | `password123` | DevOps Architect (5.0 rating, $2,800 balance) |
 | **Freelancer** | `sophia_backend` | `password123` | Spring Boot Specialist (5.0 rating, $4,100 balance) |
-
-*More accounts listed in [DOCKER_INSTRUCTIONS.md](./DOCKER_INSTRUCTIONS.md).*
 
 ---
 

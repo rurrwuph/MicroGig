@@ -1,7 +1,11 @@
 # Environment & Local Configuration
 .env
 .env.local
+.env.example
 *.log
+
+# Local Documentation & Instructions
+DOCKER_INSTRUCTIONS.md
 
 # Maven & Java build artifacts
 target/
