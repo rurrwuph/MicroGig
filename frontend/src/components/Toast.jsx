@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { IconCheckCircle, IconXCircle, IconInfo, IconClose } from './Icons';
+import { IconCheckCircle, IconXCircle, IconInfo, IconClose, IconAlertTriangle } from './Icons';
 
 // Toast Context
 export const ToastContext = React.createContext(null);
@@ -28,12 +28,14 @@ export const ToastProvider = ({ children }) => {
   const toast = {
     success: (msg, dur) => addToast(msg, 'success', dur),
     error:   (msg, dur) => addToast(msg, 'error', dur),
+    warning: (msg, dur) => addToast(msg, 'warning', dur),
     info:    (msg, dur) => addToast(msg, 'info', dur),
   };
 
   const icons = {
     success: <IconCheckCircle size={18} style={{ color: 'var(--clr-accent)' }} />,
     error:   <IconXCircle size={18} style={{ color: 'var(--clr-error)' }} />,
+    warning: <IconAlertTriangle size={18} style={{ color: 'var(--clr-warning)' }} />,
     info:    <IconInfo size={18} style={{ color: 'var(--clr-primary)' }} />,
   };
 

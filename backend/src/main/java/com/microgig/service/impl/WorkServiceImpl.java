@@ -39,9 +39,9 @@ public class WorkServiceImpl implements WorkService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(value = "availableWork", key = "'all_open'")
+    @Cacheable(value = "availableWork", key = "'all_public'")
     public List<WorkResponse> getAllWork() {
-        return workRequestRepository.findByStatusOrderByCreatedAtDesc(WorkStatus.OPEN).stream()
+        return workRequestRepository.findPublicMarketplaceWork().stream()
                 .map(EntityDtoMapper::toWorkResponse)
                 .collect(Collectors.toList());
     }

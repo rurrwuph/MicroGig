@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { getErrorMessage } from '../api';
 import { useToast } from './Toast';
 import { IconUser, IconLock } from './Icons';
 
@@ -76,8 +76,8 @@ const Profile = ({ user, setUser }) => {
       if (setUser) setUser(updatedUser);
       toast.success('Profile updated successfully');
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Failed to update profile.';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to update profile.');
+      const msg = getErrorMessage(err, 'Failed to update profile.');
+      toast.error(msg);
     } finally {
       setProfileSaving(false);
     }
@@ -103,8 +103,8 @@ const Profile = ({ user, setUser }) => {
       toast.success('Password changed successfully');
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err) {
-      const msg = err.response?.data || 'Failed to change password. Please check your current password.';
-      toast.error(typeof msg === 'string' ? msg : 'Password change failed.');
+      const msg = getErrorMessage(err, 'Failed to change password. Please check your current password.');
+      toast.error(msg);
     } finally {
       setPasswordSaving(false);
     }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { getErrorMessage } from '../api';
 import { useToast } from './Toast';
 import {
   IconAlert,
@@ -124,7 +124,7 @@ const MyAssignments = ({ user, setUser }) => {
     try {
       if (isFreelancer) {
         const [assignRes, appsRes] = await Promise.all([
-          api.get('/assignments/my'),
+          api.get('/assignments/my').catch(() => ({ data: [] })),
           api.get('/applications/my').catch(() => ({ data: [] }))
         ]);
         setMyAssignments(assignRes.data || []);
@@ -132,8 +132,8 @@ const MyAssignments = ({ user, setUser }) => {
       }
       if (isClient) {
         const [jobsRes, assignRes] = await Promise.all([
-          api.get('/work/my'),
-          api.get('/assignments/client')
+          api.get('/work/my').catch(() => ({ data: [] })),
+          api.get('/assignments/client').catch(() => ({ data: [] }))
         ]);
         const jobs = jobsRes.data || [];
         setClientJobs(jobs);
@@ -152,8 +152,9 @@ const MyAssignments = ({ user, setUser }) => {
         );
         setApplicationsMap(appsData);
       }
-    } catch {
-      toast.error('Failed to load project data.');
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to load project data.');
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -196,9 +197,10 @@ const MyAssignments = ({ user, setUser }) => {
       await api.post(`/work/${jobId}/applications/${appId}/accept`);
       toast.success('Proposal accepted! Freelancer is now assigned and active.');
       fetchData();
+      refreshUserData();
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Failed to accept proposal.';
-      toast.error(typeof msg === 'string' ? msg : 'Action failed.');
+      const msg = getErrorMessage(err, 'Failed to accept proposal.');
+      toast.error(msg);
     }
   };
 
@@ -208,7 +210,8 @@ const MyAssignments = ({ user, setUser }) => {
       toast.success('Proposal declined.');
       fetchData();
     } catch (err) {
-      toast.error('Failed to decline proposal.');
+      const msg = getErrorMessage(err, 'Failed to decline proposal.');
+      toast.error(msg);
     }
   };
 
@@ -244,8 +247,8 @@ const MyAssignments = ({ user, setUser }) => {
       setSubmitModalAssignment(null);
       fetchData();
     } catch (err) {
-      const msg = err.response?.data || 'Failed to submit work.';
-      toast.error(typeof msg === 'string' ? msg : 'Submission failed.');
+      const msg = getErrorMessage(err, 'Failed to submit work.');
+      toast.error(msg);
     } finally {
       setSubmitLoading(false);
     }
@@ -277,8 +280,8 @@ const MyAssignments = ({ user, setUser }) => {
       fetchData();
       refreshUserData();
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Cancellation failed.';
-      toast.error(typeof msg === 'string' ? msg : 'Cancellation failed.');
+      const msg = getErrorMessage(err, 'Cancellation failed.');
+      toast.error(msg);
     } finally {
       setCancelLoading(false);
     }
@@ -327,8 +330,8 @@ const MyAssignments = ({ user, setUser }) => {
       fetchData();
       refreshUserData();
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Failed to update job.';
-      toast.error(typeof msg === 'string' ? msg : 'Update failed.');
+      const msg = getErrorMessage(err, 'Failed to update job.');
+      toast.error(msg);
     } finally {
       setEditLoading(false);
     }
@@ -349,8 +352,8 @@ const MyAssignments = ({ user, setUser }) => {
       setAppealNotes('');
       fetchData();
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Failed to submit appeal.';
-      toast.error(typeof msg === 'string' ? msg : 'Appeal submission failed.');
+      const msg = getErrorMessage(err, 'Failed to submit appeal.');
+      toast.error(msg);
     } finally {
       setAppealLoading(false);
     }
@@ -368,9 +371,10 @@ const MyAssignments = ({ user, setUser }) => {
       toast.success('Job post has been cancelled.');
       setCancelJobModal(null);
       fetchData();
+      refreshUserData();
     } catch (err) {
-      const msg = err.response?.data || 'Failed to cancel job.';
-      toast.error(typeof msg === 'string' ? msg : 'Cancellation failed.');
+      const msg = getErrorMessage(err, 'Failed to cancel job.');
+      toast.error(msg);
     } finally {
       setCancelJobLoading(false);
     }
@@ -397,8 +401,8 @@ const MyAssignments = ({ user, setUser }) => {
       setRevisionModalAssignment(null);
       fetchData();
     } catch (err) {
-      const msg = err.response?.data || 'Failed to request revision.';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to request revision.');
+      const msg = getErrorMessage(err, 'Failed to request revision.');
+      toast.error(msg);
     } finally {
       setRevisionLoading(false);
     }
@@ -423,8 +427,8 @@ const MyAssignments = ({ user, setUser }) => {
       fetchData();
       refreshUserData();
     } catch (err) {
-      const msg = err.response?.data || 'Payment failed.';
-      toast.error(typeof msg === 'string' ? msg : 'Payment failed.');
+      const msg = getErrorMessage(err, 'Payment failed.');
+      toast.error(msg);
     } finally {
       setPayLoading(false);
     }

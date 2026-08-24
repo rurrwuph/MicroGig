@@ -29,4 +29,10 @@ public interface AdminService {
     Page<WorkResponse> getWorkRequestsDrillDown(WorkStatus status, Pageable pageable);
 
     WorkResponse flagWorkRequestManually(Long adminId, Long workRequestId, ManualFlagRequest request);
+
+    WorkResponse suspendWorkRequest(Long adminId, Long workRequestId, String reason);
+
+    WorkResponse unsuspendWorkRequest(Long adminId, Long workRequestId);
+
+    PlatformEarningsResponse getPlatformEarnings();
 }

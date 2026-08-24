@@ -31,6 +31,9 @@ public class AdminServiceImpl implements AdminService {
     private final NotificationRepository notificationRepository;
     private final TransactionRepository transactionRepository;
 
+    @org.springframework.beans.factory.annotation.Value("${microgig.admin-commission-rate:0.001}")
+    private java.math.BigDecimal adminCommissionRate;
+
     @Override
     @Transactional(readOnly = true)
     public Map<String, Object> getSystemStats() {
@@ -39,8 +42,17 @@ public class AdminServiceImpl implements AdminService {
         stats.put("totalClients", userRepository.countUsersByRoleNative("ROLE_CLIENT"));
         stats.put("totalFreelancers", userRepository.countUsersByRoleNative("ROLE_FREELANCER"));
         stats.put("totalJobs", workRequestRepository.count());
+        stats.put("openJobs", workRequestRepository.countByStatus(WorkStatus.OPEN));
+        stats.put("completedJobs", workRequestRepository.countByStatus(WorkStatus.COMPLETED));
         stats.put("totalAssignments", workAssignmentRepository.count());
         stats.put("flaggedJobs", workRequestRepository.countByStatus(WorkStatus.FLAGGED));
+        stats.put("suspendedJobs", workRequestRepository.countByStatus(WorkStatus.SUSPENDED));
+
+        java.math.BigDecimal totalCommission = transactionRepository.sumAmountByTypeNative("COMMISSION");
+        java.math.BigDecimal totalVolume = transactionRepository.sumTotalVolumeNative();
+        stats.put("platformEarnings", totalCommission != null ? totalCommission : java.math.BigDecimal.ZERO);
+        stats.put("totalCompletedVolume", totalVolume != null ? totalVolume : java.math.BigDecimal.ZERO);
+        stats.put("adminCommissionRate", adminCommissionRate != null ? adminCommissionRate : new java.math.BigDecimal("0.001"));
         return stats;
     }
 
@@ -374,6 +386,142 @@ public class AdminServiceImpl implements AdminService {
         notificationRepository.save(notif);
 
         return EntityDtoMapper.toWorkResponse(workRequest);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "availableWork", allEntries = true)
+    public WorkResponse suspendWorkRequest(Long adminId, Long workRequestId, String reason) {
+        User admin = userRepository.findById(adminId)
+                .orElseThrow(() -> new IllegalArgumentException("Admin not found with id: " + adminId));
+
+        if (admin.getRole() != Role.ROLE_ADMIN) {
+            throw new IllegalStateException("Only administrators can suspend work requests.");
+        }
+
+        WorkRequest workRequest = workRequestRepository.findById(workRequestId)
+                .orElseThrow(() -> new IllegalArgumentException("Work request not found with id: " + workRequestId));
+
+        WorkStatus previousStatus = workRequest.getStatus();
+        String suspensionReason = (reason != null && !reason.isBlank()) ? reason.trim() : "Severe policy violation or administrative action.";
+
+        workRequest.setStatus(WorkStatus.SUSPENDED);
+        workRequest.setModerationReason("Administrative Suspension: " + suspensionReason);
+        workRequest.setFlaggedAt(LocalDateTime.now());
+        workRequest.setAppealRequested(false);
+        workRequest.setAppealNotes(null);
+        workRequest.setAppealRequestedAt(null);
+
+        workRequest = workRequestRepository.save(workRequest);
+
+        // Handle escrow if assigned
+        handleEscrowLockIfAssigned(workRequest, previousStatus, suspensionReason);
+
+        // Notify client
+        Notification notif = Notification.builder()
+                .user(workRequest.getClient())
+                .type("POST_SUSPENDED")
+                .title("Job Post Suspended by Administrator: " + workRequest.getTitle())
+                .message("Your job post #" + workRequest.getId() + " has been suspended and removed from the active marketplace. Reason: " + suspensionReason)
+                .referenceId(workRequest.getId())
+                .isRead(false)
+                .createdAt(LocalDateTime.now())
+                .build();
+        notificationRepository.save(notif);
+
+        return EntityDtoMapper.toWorkResponse(workRequest);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "availableWork", allEntries = true)
+    public WorkResponse unsuspendWorkRequest(Long adminId, Long workRequestId) {
+        User admin = userRepository.findById(adminId)
+                .orElseThrow(() -> new IllegalArgumentException("Admin not found with id: " + adminId));
+
+        if (admin.getRole() != Role.ROLE_ADMIN) {
+            throw new IllegalStateException("Only administrators can restore suspended work requests.");
+        }
+
+        WorkRequest workRequest = workRequestRepository.findById(workRequestId)
+                .orElseThrow(() -> new IllegalArgumentException("Work request not found with id: " + workRequestId));
+
+        workRequest.setStatus(WorkStatus.OPEN);
+        workRequest.setModerationReason(null);
+        workRequest.setFlaggedAt(null);
+        workRequest.setAppealRequested(false);
+        workRequest.setAppealNotes(null);
+        workRequest.setAppealRequestedAt(null);
+
+        workRequest = workRequestRepository.save(workRequest);
+
+        // Notify client
+        Notification notif = Notification.builder()
+                .user(workRequest.getClient())
+                .type("POST_UNSUSPENDED")
+                .title("Job Post Restored by Administrator: " + workRequest.getTitle())
+                .message("Your job post #" + workRequest.getId() + " has been unsuspended and restored to the active marketplace.")
+                .referenceId(workRequest.getId())
+                .isRead(false)
+                .createdAt(LocalDateTime.now())
+                .build();
+        notificationRepository.save(notif);
+
+        return EntityDtoMapper.toWorkResponse(workRequest);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.microgig.payload.response.PlatformEarningsResponse getPlatformEarnings() {
+        java.math.BigDecimal totalCommission = transactionRepository.sumAmountByTypeNative("COMMISSION");
+        java.math.BigDecimal totalVolume = transactionRepository.sumTotalVolumeNative();
+
+        List<Transaction> commissionTxList = transactionRepository.findByTypeOrderByCreatedAtDesc("COMMISSION");
+
+        List<com.microgig.payload.response.PlatformEarningsResponse.CommissionEntryDto> entries = commissionTxList.stream().map(tx -> {
+            Long assignmentId = tx.getWorkAssignment() != null ? tx.getWorkAssignment().getId() : null;
+            Long jobId = null;
+            String jobTitle = "Platform Fee";
+            String clientUser = "—";
+            String freelancerUser = "—";
+            java.math.BigDecimal dealAmount = java.math.BigDecimal.ZERO;
+
+            if (tx.getWorkAssignment() != null) {
+                WorkAssignment wa = tx.getWorkAssignment();
+                if (wa.getWorkRequest() != null) {
+                    jobId = wa.getWorkRequest().getId();
+                    jobTitle = wa.getWorkRequest().getTitle();
+                    dealAmount = wa.getWorkRequest().getAmount();
+                    if (wa.getWorkRequest().getClient() != null) {
+                        clientUser = wa.getWorkRequest().getClient().getUsername();
+                    }
+                }
+                if (wa.getFreelancer() != null) {
+                    freelancerUser = wa.getFreelancer().getUsername();
+                }
+            }
+
+            return com.microgig.payload.response.PlatformEarningsResponse.CommissionEntryDto.builder()
+                    .id(tx.getId())
+                    .assignmentId(assignmentId)
+                    .jobId(jobId)
+                    .jobTitle(jobTitle)
+                    .clientUsername(clientUser)
+                    .freelancerUsername(freelancerUser)
+                    .dealAmount(dealAmount)
+                    .commissionAmount(tx.getAmount())
+                    .description(tx.getDescription())
+                    .createdAt(tx.getCreatedAt())
+                    .build();
+        }).collect(Collectors.toList());
+
+        return com.microgig.payload.response.PlatformEarningsResponse.builder()
+                .totalEarnings(totalCommission != null ? totalCommission : java.math.BigDecimal.ZERO)
+                .totalCompletedVolume(totalVolume != null ? totalVolume : java.math.BigDecimal.ZERO)
+                .commissionRate(adminCommissionRate != null ? adminCommissionRate : new java.math.BigDecimal("0.001"))
+                .totalCommissionTransactions((long) entries.size())
+                .recentTransactions(entries)
+                .build();
     }
 }
 

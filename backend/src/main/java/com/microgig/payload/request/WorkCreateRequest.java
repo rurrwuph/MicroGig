@@ -31,6 +31,7 @@ public class WorkCreateRequest {
     private BigDecimal amount;
 
     @NotNull(message = "Deadline is required")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd['T'[HH:mm:ss[.SSS][XXX][X]]]", shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private LocalDateTime deadline;
 
     private String category;

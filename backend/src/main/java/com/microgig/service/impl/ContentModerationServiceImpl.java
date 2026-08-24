@@ -53,14 +53,23 @@ public class ContentModerationServiceImpl implements ContentModerationService {
             String category = entry.getKey();
             RuleDefinition rule = entry.getValue();
 
+            boolean matches = false;
             try {
-                boolean matches = moderationRepository.testPatternNative(combined, rule.regex());
-                if (matches) {
-                    log.warn("Moderation Policy Violation [{}]: {}", category, rule.message());
-                    return ModerationResult.flagged(category, rule.regex(), rule.message());
-                }
+                matches = moderationRepository.testPatternNative(combined, rule.regex());
             } catch (Exception e) {
-                log.error("Error executing Native SQL moderation regex for category {}: {}", category, e.getMessage());
+                log.warn("Native SQL moderation query failed, falling back to Java regex for category {}: {}", category, e.getMessage());
+                try {
+                    String javaRegex = rule.regex().replace("\\m", "\\b").replace("\\M", "\\b");
+                    java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(javaRegex, java.util.regex.Pattern.CASE_INSENSITIVE);
+                    matches = pattern.matcher(combined).find();
+                } catch (Exception ex) {
+                    log.error("Java regex fallback also failed for category {}: {}", category, ex.getMessage());
+                }
+            }
+
+            if (matches) {
+                log.warn("Moderation Policy Violation [{}]: {}", category, rule.message());
+                return ModerationResult.flagged(category, rule.regex(), rule.message());
             }
         }
 

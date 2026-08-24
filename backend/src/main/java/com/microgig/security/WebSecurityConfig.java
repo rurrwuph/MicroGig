@@ -51,7 +51,8 @@ public class WebSecurityConfig {
                 .authorizeHttpRequests(auth ->
                         auth.requestMatchers("/api/auth/**", "/login/oauth2/**", "/oauth2/**", "/error").permitAll()
                                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                                .requestMatchers("/api/user/public/**").permitAll()
+                                .requestMatchers("/api/user/public/**", "/api/leaderboard/**").permitAll()
+                                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/work", "/api/work/**").permitAll()
                                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                                 .anyRequest().authenticated()
                 )

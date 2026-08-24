@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { getErrorMessage } from '../api';
 import { useToast } from './Toast';
 import {
   IconWallet,
@@ -124,8 +124,8 @@ const Dashboard = ({ user, setUser }) => {
       setNotesModalJob(null);
       setAdminNotes('');
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Moderation action failed.';
-      toast.error(typeof msg === 'string' ? msg : 'Moderation action failed.');
+      const msg = getErrorMessage(err, 'Moderation action failed.');
+      toast.error(msg);
     } finally {
       setModLoading(null);
     }
@@ -154,9 +154,13 @@ const Dashboard = ({ user, setUser }) => {
       } else if (type === 'JOBS') {
         const res = await api.get('/admin/work-requests?size=50');
         setDrillData(res.data?.content || []);
+      } else if (type === 'EARNINGS') {
+        const res = await api.get('/admin/earnings');
+        setDrillData(res.data || {});
       }
-    } catch {
-      toast.error('Failed to load drill-down data.');
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to load drill-down data.');
+      toast.error(msg);
     } finally {
       setDrillLoading(false);
     }
@@ -166,15 +170,40 @@ const Dashboard = ({ user, setUser }) => {
     try {
       await api.put(`/admin/users/${userId}/lock?locked=${!currentStatus}`);
       toast.success(`User #${userId} lock status updated to: ${!currentStatus}`);
-      setDrillData(prev => prev.map(u => u.id === userId ? { ...u, locked: !currentStatus } : u));
-    } catch {
-      toast.error('Failed to update lock status.');
+      setDrillData(prev => Array.isArray(prev) ? prev.map(u => u.id === userId ? { ...u, locked: !currentStatus } : u) : prev);
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to update lock status.');
+      toast.error(msg);
+    }
+  };
+
+  const handleQuickSuspend = async (job) => {
+    const reason = window.prompt(`Enter suspension reason for job #${job.id} ("${job.title}"):`, 'Administrative policy violation');
+    if (reason === null) return;
+    try {
+      await api.patch(`/admin/work-requests/${job.id}/suspend`, { reason: reason.trim() || 'Suspended by Administrator' });
+      toast.success(`Job #${job.id} suspended.`);
+      setDrillData(prev => Array.isArray(prev) ? prev.map(j => j.id === job.id ? { ...j, status: 'SUSPENDED' } : j) : prev);
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to suspend job.');
+      toast.error(msg);
+    }
+  };
+
+  const handleQuickUnsuspend = async (job) => {
+    try {
+      await api.patch(`/admin/work-requests/${job.id}/unsuspend`);
+      toast.success(`Job #${job.id} unsuspended and restored.`);
+      setDrillData(prev => Array.isArray(prev) ? prev.map(j => j.id === job.id ? { ...j, status: 'OPEN' } : j) : prev);
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to unsuspend job.');
+      toast.error(msg);
     }
   };
 
   const handleManualFlagSubmit = async (e) => {
     e.preventDefault();
-    if (!manualFlagJob || !manualFlagReason.trim()) return;
+    if (!manualFlagJob || !manualFlagReason.trim() || manualFlagLoading) return;
 
     setManualFlagLoading(true);
     try {
@@ -189,7 +218,8 @@ const Dashboard = ({ user, setUser }) => {
         openDrillDown('JOBS');
       }
     } catch (err) {
-      toast.error('Failed to manually flag job.');
+      const msg = getErrorMessage(err, 'Failed to manually flag job.');
+      toast.error(msg);
     } finally {
       setManualFlagLoading(false);
     }
@@ -255,6 +285,12 @@ const Dashboard = ({ user, setUser }) => {
       {isAdmin && (
         <div className="stats-grid">
           <StatCard
+            icon={<IconWallet size={22} />} label="Platform Earnings"
+            value={`$${Number(adminStats?.platformEarnings ?? 0).toFixed(2)}`} color="green"
+            subtitle="Click to view revenue & fee ledger"
+            onClick={() => openDrillDown('EARNINGS')}
+          />
+          <StatCard
             icon={<IconUser size={22} />} label="Total Users"
             value={adminStats?.totalUsers ?? 0} color="cyan"
             subtitle="Click to view & lock users"
@@ -275,7 +311,7 @@ const Dashboard = ({ user, setUser }) => {
           <StatCard
             icon={<IconCheck size={22} />} label="Total Jobs Posted"
             value={adminStats?.totalJobs ?? 0} color="amber"
-            subtitle="Click to inspect & flag"
+            subtitle="Click to inspect & moderate"
             onClick={() => openDrillDown('JOBS')}
           />
           <StatCard
@@ -577,13 +613,14 @@ const Dashboard = ({ user, setUser }) => {
       {/* ADMIN: Drill-Down Drawer Modal */}
       {drillModalType && (
         <div className="modal-overlay" onClick={() => setDrillModalType(null)}>
-          <div className="modal-card" style={{ maxWidth: '900px', width: '95%', maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '950px', width: '95%', maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>
+                {drillModalType === 'EARNINGS' && '💰 Platform Revenue & Commission Ledger'}
                 {drillModalType === 'USERS' && '👥 User Management & Lock Center'}
                 {drillModalType === 'CLIENTS' && '💼 Client Escrow & Project Analytics'}
                 {drillModalType === 'FREELANCERS' && '⭐ Freelancer Performance & Ratings'}
-                {drillModalType === 'JOBS' && '📋 All Platform Jobs & Manual Moderation'}
+                {drillModalType === 'JOBS' && '📋 All Platform Jobs & Moderation'}
               </h3>
               <button className="modal-close-btn" onClick={() => setDrillModalType(null)}>
                 <IconClose size={16} />
@@ -597,6 +634,76 @@ const Dashboard = ({ user, setUser }) => {
               </div>
             ) : (
               <div>
+                {/* 0. PLATFORM EARNINGS & REVENUE DRILL DOWN */}
+                {drillModalType === 'EARNINGS' && (
+                  <div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                      <div style={{ background: 'var(--clr-surface-2)', padding: '1rem', borderRadius: 'var(--r-md)', border: '1px solid var(--clr-border)' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)', textTransform: 'uppercase', fontWeight: 600 }}>Total Revenue (Fees)</div>
+                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--clr-success)', marginTop: '0.25rem' }}>
+                          ${Number(drillData.totalEarnings || 0).toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-2)', marginTop: '0.2rem' }}>All-time platform commissions</div>
+                      </div>
+                      <div style={{ background: 'var(--clr-surface-2)', padding: '1rem', borderRadius: 'var(--r-md)', border: '1px solid var(--clr-border)' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)', textTransform: 'uppercase', fontWeight: 600 }}>Total Volume Transacted</div>
+                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--clr-primary)', marginTop: '0.25rem' }}>
+                          ${Number(drillData.totalCompletedVolume || 0).toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-2)', marginTop: '0.2rem' }}>Total payouts disbursed</div>
+                      </div>
+                      <div style={{ background: 'var(--clr-surface-2)', padding: '1rem', borderRadius: 'var(--r-md)', border: '1px solid var(--clr-border)' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)', textTransform: 'uppercase', fontWeight: 600 }}>Commission Rate</div>
+                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--clr-accent)', marginTop: '0.25rem' }}>
+                          {(Number(drillData.commissionRate || 0.001) * 100).toFixed(1)}%
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-2)', marginTop: '0.2rem' }}>Platform cut per completion</div>
+                      </div>
+                    </div>
+
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.75rem' }}>Commission Transactions Ledger</h4>
+                    {(!drillData.recentTransactions || drillData.recentTransactions.length === 0) ? (
+                      <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--clr-text-3)', background: 'var(--clr-surface-2)', borderRadius: 'var(--r-md)' }}>
+                        No platform commission transactions recorded yet. Commissions are earned automatically when gigs complete.
+                      </div>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid var(--clr-border)', textAlign: 'left', color: 'var(--clr-text-3)' }}>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Date</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Job Title</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Client</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Freelancer</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Gross Deal</th>
+                              <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right' }}>Platform Fee</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {drillData.recentTransactions.map(tx => (
+                              <tr key={tx.id} style={{ borderBottom: '1px solid var(--clr-border)' }}>
+                                <td style={{ padding: '0.65rem 0.5rem', fontSize: '0.78rem', color: 'var(--clr-text-3)' }}>
+                                  {new Date(tx.createdAt).toLocaleDateString()}
+                                </td>
+                                <td style={{ padding: '0.65rem 0.5rem' }}>
+                                  <strong>{tx.jobTitle}</strong>
+                                  {tx.jobId && <div style={{ fontSize: '0.75rem', color: 'var(--clr-text-3)' }}>Job #{tx.jobId}</div>}
+                                </td>
+                                <td style={{ padding: '0.65rem 0.5rem' }}>@{tx.clientUsername}</td>
+                                <td style={{ padding: '0.65rem 0.5rem' }}>@{tx.freelancerUsername}</td>
+                                <td style={{ padding: '0.65rem 0.5rem', fontWeight: 600 }}>${Number(tx.dealAmount || 0).toFixed(2)}</td>
+                                <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 700, color: 'var(--clr-success)' }}>
+                                  +${Number(tx.commissionAmount || 0).toFixed(2)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 1. USERS DRILL DOWN */}
                 {drillModalType === 'USERS' && (
                   <div style={{ overflowX: 'auto' }}>
@@ -612,7 +719,7 @@ const Dashboard = ({ user, setUser }) => {
                         </tr>
                       </thead>
                       <tbody>
-                        {drillData.map(u => (
+                        {Array.isArray(drillData) && drillData.map(u => (
                           <tr key={u.id} style={{ borderBottom: '1px solid var(--clr-border)' }}>
                             <td style={{ padding: '0.65rem 0.5rem' }}>
                               <strong>{u.fullName || u.username}</strong>
@@ -665,7 +772,7 @@ const Dashboard = ({ user, setUser }) => {
                         </tr>
                       </thead>
                       <tbody>
-                        {drillData.map(c => (
+                        {Array.isArray(drillData) && drillData.map(c => (
                           <tr key={c.id} style={{ borderBottom: '1px solid var(--clr-border)' }}>
                             <td style={{ padding: '0.65rem 0.5rem' }}>
                               <strong>{c.fullName || c.username}</strong>
@@ -697,7 +804,7 @@ const Dashboard = ({ user, setUser }) => {
                         </tr>
                       </thead>
                       <tbody>
-                        {drillData.map(f => (
+                        {Array.isArray(drillData) && drillData.map(f => (
                           <tr key={f.id} style={{ borderBottom: '1px solid var(--clr-border)' }}>
                             <td style={{ padding: '0.65rem 0.5rem' }}>
                               <strong>{f.fullName || f.username}</strong>
@@ -716,7 +823,7 @@ const Dashboard = ({ user, setUser }) => {
                   </div>
                 )}
 
-                {/* 4. JOBS DRILL DOWN (With Manual Override) */}
+                {/* 4. JOBS DRILL DOWN (With Direct Suspend & Override) */}
                 {drillModalType === 'JOBS' && (
                   <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
@@ -730,7 +837,7 @@ const Dashboard = ({ user, setUser }) => {
                         </tr>
                       </thead>
                       <tbody>
-                        {drillData.map(j => (
+                        {Array.isArray(drillData) && drillData.map(j => (
                           <tr key={j.id} style={{ borderBottom: '1px solid var(--clr-border)' }}>
                             <td style={{ padding: '0.65rem 0.5rem' }}>
                               <strong>{j.title}</strong>
@@ -742,15 +849,34 @@ const Dashboard = ({ user, setUser }) => {
                               <span className="badge badge-open" style={{ fontSize: '0.72rem' }}>{j.status}</span>
                             </td>
                             <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right' }}>
-                              {j.status !== 'FLAGGED' && j.status !== 'SUSPENDED' && (
-                                <button
-                                  className="btn btn-ghost btn-sm"
-                                  style={{ color: 'var(--clr-error)', borderColor: 'rgba(239,68,68,0.3)', fontSize: '0.75rem' }}
-                                  onClick={() => { setManualFlagJob(j); setManualFlagReason(''); }}
-                                >
-                                  🛑 Manual Flag
-                                </button>
-                              )}
+                              <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'flex-end' }}>
+                                {j.status === 'SUSPENDED' ? (
+                                  <button
+                                    className="btn btn-sm btn-success"
+                                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                                    onClick={() => handleQuickUnsuspend(j)}
+                                  >
+                                    ✓ Restore
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ color: 'var(--clr-error)', borderColor: 'rgba(239,68,68,0.3)', fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                                    onClick={() => handleQuickSuspend(j)}
+                                  >
+                                    🛑 Suspend
+                                  </button>
+                                )}
+                                {j.status !== 'FLAGGED' && j.status !== 'SUSPENDED' && (
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ color: 'var(--clr-warning)', borderColor: 'rgba(245,158,11,0.3)', fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                                    onClick={() => { setManualFlagJob(j); setManualFlagReason(''); }}
+                                  >
+                                    🚩 Flag
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}

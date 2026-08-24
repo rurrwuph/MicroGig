@@ -37,6 +37,11 @@ public class MicroGigApplication {
 			} catch (Exception ignored) {}
 
 			try {
+				jdbcTemplate.execute("ALTER TABLE work_requests ADD COLUMN IF NOT EXISTS appeal_requested BOOLEAN NOT NULL DEFAULT FALSE;");
+				jdbcTemplate.execute("ALTER TABLE work_requests ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;");
+			} catch (Exception ignored) {}
+
+			try {
 				// Ensure work_assignment_id in transactions is nullable (for TOPUP events)
 				jdbcTemplate.execute("ALTER TABLE transactions ALTER COLUMN work_assignment_id DROP NOT NULL;");
 			} catch (Exception ignored) {}

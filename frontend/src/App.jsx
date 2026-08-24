@@ -73,7 +73,7 @@ function App() {
             <Protected user={user}><Dashboard user={user} setUser={updateUser} /></Protected>
           } />
           <Route path="/jobs" element={
-            <Protected user={user}><WorkList user={user} /></Protected>
+            <Protected user={user}><WorkList user={user} setUser={updateUser} /></Protected>
           } />
           <Route path="/my-assignments" element={
             <Protected user={user}><MyAssignments user={user} setUser={updateUser} /></Protected>
@@ -91,7 +91,7 @@ function App() {
           {/* Client-only routes */}
           <Route path="/post-job" element={
             <Protected user={user}>
-              {isClient ? <PostJob user={user} /> : <Navigate to="/dashboard" replace />}
+              {isClient ? <PostJob user={user} setUser={updateUser} /> : <Navigate to="/dashboard" replace />}
             </Protected>
           } />
 

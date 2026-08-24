@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { getErrorMessage } from '../api';
 import { useToast } from './Toast';
 import { IconWallet, IconAlert, IconArrowUpRight, IconClose, IconCreditCard, IconArrowDownLeft } from './Icons';
 
@@ -102,8 +102,8 @@ const Wallet = ({ user, setUser }) => {
       setAmount('');
       fetchTransactions();
     } catch (err) {
-      const msg = err.response?.data || 'Top-up failed. Please try again.';
-      toast.error(typeof msg === 'string' ? msg : 'Top-up failed.');
+      const msg = getErrorMessage(err, 'Top-up failed. Please try again.');
+      toast.error(msg);
     } finally {
       setTopupLoading(false);
     }
@@ -146,8 +146,8 @@ const Wallet = ({ user, setUser }) => {
       setWithdrawAccount('');
       fetchTransactions();
     } catch (err) {
-      const msg = err.response?.data || 'Withdrawal failed. Please try again.';
-      toast.error(typeof msg === 'string' ? msg : 'Withdrawal failed.');
+      const msg = getErrorMessage(err, 'Withdrawal failed. Please try again.');
+      toast.error(msg);
     } finally {
       setWithdrawLoading(false);
     }

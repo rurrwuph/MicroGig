@@ -1,32 +1,40 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { getErrorMessage } from '../api';
 import { useToast } from './Toast';
 import {
   IconSearch,
-  IconCalendar,
   IconClock,
+  IconCalendar,
   IconUser,
-  IconRefresh,
-  IconEdit,
-  IconCheck,
+  IconSend,
   IconClose,
-  IconSend
+  IconRefresh,
+  IconEdit
 } from './Icons';
 
-const STATUS_FILTERS = ['ALL', 'OPEN', 'ASSIGNED', 'COMPLETED'];
 const CATEGORY_FILTERS = [
   'ALL',
   'Web Development',
-  'Mobile Apps',
-  'UI/UX & Graphic Design',
-  'Bug Fixes & DevOps',
-  'Data Science & AI',
+  'Mobile Development',
+  'Design & Creative',
   'Writing & Translation',
+  'AI & Data Science',
+  'DevOps & Cloud',
+  'Other'
+];
+
+const STATUS_FILTERS = ['OPEN', 'ASSIGNED', 'COMPLETED', 'ALL'];
+
+const SORT_OPTIONS = [
+  { value: 'NEWEST', label: 'Newest First' },
+  { value: 'BUDGET_HIGH', label: 'Highest Budget' },
+  { value: 'BUDGET_LOW', label: 'Lowest Budget' },
+  { value: 'DEADLINE', label: 'Urgent Deadline' },
 ];
 
 const SkeletonCard = () => (
-  <div className="skeleton-card">
+  <div className="job-card skeleton-card">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
       <div className="skeleton" style={{ height: 20, width: '60%' }} />
       <div className="skeleton" style={{ height: 28, width: 80, borderRadius: 'var(--r-full)' }} />
@@ -40,9 +48,10 @@ const SkeletonCard = () => (
   </div>
 );
 
-const WorkList = ({ user }) => {
+const WorkList = ({ user, setUser }) => {
   const navigate = useNavigate();
   const toast = useToast();
+  const isAdmin = user?.role === 'ROLE_ADMIN' || user?.role === 'ADMIN';
   const isFreelancer = user?.role === 'ROLE_FREELANCER';
   const isClient = user?.role === 'ROLE_CLIENT';
 
@@ -66,21 +75,71 @@ const WorkList = ({ user }) => {
   });
   const [submittingProposal, setSubmittingProposal] = useState(false);
 
+  // Admin Marketplace Moderation State
+  const [adminSuspendModalJob, setAdminSuspendModalJob] = useState(null);
+  const [suspendReason, setSuspendReason] = useState('');
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
+
   const loadWorks = useCallback(async () => {
     setLoading(true);
     try {
       const [worksRes, appsRes] = await Promise.all([
-        api.get('/work'),
+        api.get('/work').catch(() => ({ data: [] })),
         isFreelancer ? api.get('/applications/my').catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
       ]);
       setWorks(worksRes.data || []);
       setMyApplications(appsRes.data || []);
-    } catch {
-      toast.error('Failed to load jobs. Please try again.');
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to load jobs. Please try again.');
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   }, [isFreelancer]);
+
+  /* ── ADMIN: Marketplace Moderation Actions ── */
+  const handleAdminSuspend = async (e) => {
+    e.preventDefault();
+    if (!adminSuspendModalJob || adminActionLoading) return;
+    setAdminActionLoading(true);
+    try {
+      await api.patch(`/admin/work-requests/${adminSuspendModalJob.id}/suspend`, {
+        reason: suspendReason.trim() || 'Suspended by Administrator from Marketplace'
+      });
+      toast.success(`Job #${adminSuspendModalJob.id} suspended and removed from public marketplace.`);
+      setAdminSuspendModalJob(null);
+      setSuspendReason('');
+      loadWorks();
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to suspend job.');
+      toast.error(msg);
+    } finally {
+      setAdminActionLoading(false);
+    }
+  };
+
+  const handleAdminUnsuspend = async (job) => {
+    try {
+      await api.patch(`/admin/work-requests/${job.id}/unsuspend`);
+      toast.success(`Job #${job.id} unsuspended and restored to active marketplace.`);
+      loadWorks();
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to unsuspend job.');
+      toast.error(msg);
+    }
+  };
+
+  const handleAdminDelete = async (job) => {
+    if (!window.confirm(`Are you sure you want to delete job #${job.id} ("${job.title}")?`)) return;
+    try {
+      await api.patch(`/admin/work-requests/${job.id}/moderate`, { action: 'SOFT_DELETE' });
+      toast.success(`Job #${job.id} deleted successfully.`);
+      loadWorks();
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to delete job.');
+      toast.error(msg);
+    }
+  };
 
   useEffect(() => {
     loadWorks();
@@ -88,26 +147,27 @@ const WorkList = ({ user }) => {
 
   // Fetch live viewer stats for open works
   useEffect(() => {
-    if (works.length === 0) return;
-
-    const fetchLiveStats = async () => {
-      const openWorks = works.filter(w => w.status === 'OPEN').slice(0, 8);
-      const updates = {};
-      await Promise.all(
-        openWorks.map(async (w) => {
-          try {
-            const res = await api.get(`/work/${w.id}/live-stats`);
-            if (res.data) {
-              updates[w.id] = res.data;
+    if (!works.length) return;
+    const fetchStats = async () => {
+      try {
+        const statsMap = {};
+        await Promise.all(
+          works.slice(0, 15).map(async (w) => {
+            try {
+              const res = await api.get(`/work/${w.id}/live-stats`);
+              if (res.data) statsMap[w.id] = res.data;
+            } catch {
+              // Silently ignore live stats error
             }
-          } catch { /* ignore */ }
-        })
-      );
-      setLiveStatsMap(prev => ({ ...prev, ...updates }));
+          })
+        );
+        setLiveStatsMap(statsMap);
+      } catch {
+        // Non-critical
+      }
     };
-
-    fetchLiveStats();
-    const interval = setInterval(fetchLiveStats, 20000);
+    fetchStats();
+    const interval = setInterval(fetchStats, 15000); // 15s refresh
     return () => clearInterval(interval);
   }, [works]);
 
@@ -122,7 +182,7 @@ const WorkList = ({ user }) => {
 
   const handleApplySubmit = async (e) => {
     e.preventDefault();
-    if (!applyModalJob) return;
+    if (!applyModalJob || submittingProposal) return;
 
     setSubmittingProposal(true);
     try {
@@ -133,11 +193,11 @@ const WorkList = ({ user }) => {
       });
 
       toast.success(`Proposal submitted for "${applyModalJob.title}"! The client has been notified.`);
-      setMyApplications(prev => [res.data, ...prev]);
+      setMyApplications(prev => Array.isArray(prev) ? [res.data, ...prev] : [res.data]);
       setApplyModalJob(null);
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Failed to submit proposal.';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to submit proposal.');
+      const msg = getErrorMessage(err, 'Failed to submit proposal.');
+      toast.error(msg);
     } finally {
       setSubmittingProposal(false);
     }
@@ -177,7 +237,9 @@ const WorkList = ({ user }) => {
       OPEN: 'badge-open',
       ASSIGNED: 'badge-assigned',
       COMPLETED: 'badge-completed',
-      CANCELLED: 'badge-expired'
+      CANCELLED: 'badge-expired',
+      SUSPENDED: 'badge-expired',
+      FLAGGED: 'badge-expired'
     };
     return map[s] || 'badge-open';
   };
@@ -371,6 +433,7 @@ const WorkList = ({ user }) => {
                     {w.status}
                   </span>
 
+                  {/* Regular User Actions */}
                   {isFreelancer && w.status === 'OPEN' && (
                     applied ? (
                       <span className="badge badge-assigned" style={{ fontSize: '0.8rem', padding: '6px 12px', fontWeight: 700 }}>
@@ -388,7 +451,7 @@ const WorkList = ({ user }) => {
                     )
                   )}
 
-                  {isMyPost && (
+                  {isMyPost && !isAdmin && (
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => navigate('/my-assignments')}
@@ -398,10 +461,42 @@ const WorkList = ({ user }) => {
                     </button>
                   )}
 
-                  {!isFreelancer && !isMyPost && w.status === 'OPEN' && (
+                  {!isFreelancer && !isMyPost && !isAdmin && w.status === 'OPEN' && (
                     <span style={{ fontSize: '0.775rem', color: 'var(--clr-text-3)' }}>
                       Accepting proposals
                     </span>
+                  )}
+
+                  {/* ADMIN Marketplace Moderation Controls */}
+                  {isAdmin && (
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {w.status === 'SUSPENDED' ? (
+                        <button
+                          className="btn btn-sm btn-success"
+                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+                          onClick={() => handleAdminUnsuspend(w)}
+                        >
+                          ✓ Restore to Open
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          style={{ color: 'var(--clr-error)', borderColor: 'rgba(239, 68, 68, 0.4)', fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+                          onClick={() => { setAdminSuspendModalJob(w); setSuspendReason(''); }}
+                          title="Suspend this post and hide from marketplace"
+                        >
+                          🛑 Suspend Post
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ color: 'var(--clr-text-3)', fontSize: '0.75rem', padding: '0.3rem 0.5rem' }}
+                        onClick={() => handleAdminDelete(w)}
+                        title="Delete post"
+                      >
+                        🗑
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -483,6 +578,52 @@ const WorkList = ({ user }) => {
                   disabled={submittingProposal || !proposalForm.proposalNotes.trim() || !proposalForm.bidAmount}
                 >
                   {submittingProposal ? <><span className="spinner" /> Submitting…</> : 'Submit Proposal'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN: Marketplace Post Suspension Modal */}
+      {adminSuspendModalJob && (
+        <div className="modal-overlay" onClick={() => setAdminSuspendModalJob(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🛑 Suspend Marketplace Post</h3>
+              <button className="modal-close-btn" onClick={() => setAdminSuspendModalJob(null)}>
+                <IconClose size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAdminSuspend}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--clr-text-2)', marginBottom: '1rem' }}>
+                You are suspending "<strong>{adminSuspendModalJob.title}</strong>" posted by @{adminSuspendModalJob.client?.username}.
+                This will immediately hide the post from the public marketplace, notify the client, and freeze escrow if assigned.
+              </p>
+
+              <div className="form-group">
+                <label className="form-label">Reason for Suspension *</label>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  placeholder="State reason (e.g. Inappropriate content, disguised contact information, off-platform payment attempt, duplicate listing)…"
+                  value={suspendReason}
+                  onChange={e => setSuspendReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setAdminSuspendModalJob(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-danger"
+                  disabled={adminActionLoading || !suspendReason.trim()}
+                >
+                  {adminActionLoading ? <><span className="spinner" /> Suspending…</> : 'Confirm Suspension'}
                 </button>
               </div>
             </form>

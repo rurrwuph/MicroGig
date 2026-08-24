@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { getErrorMessage } from '../api';
 import { useToast } from './Toast';
 import {
   IconArrowLeft,
@@ -27,7 +27,7 @@ const SUGGESTED_SKILLS = [
   'Figma', 'UI Design', 'Docker', 'REST API', 'JavaScript', 'TypeScript'
 ];
 
-const PostJob = ({ user }) => {
+const PostJob = ({ user, setUser }) => {
   const navigate = useNavigate();
   const toast = useToast();
   const dateInputRef = useRef(null);
@@ -42,6 +42,22 @@ const PostJob = ({ user }) => {
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // Sync real-time balance on mount
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        const res = await api.get('/user/me');
+        if (res.data?.balance !== undefined && setUser) {
+          const updated = { ...user, balance: res.data.balance };
+          setUser(updated);
+        }
+      } catch {
+        // non-critical
+      }
+    };
+    fetchBalance();
+  }, []);
 
   const update = (field, val) => {
     setForm(f => ({ ...f, [field]: val }));
@@ -97,6 +113,7 @@ const PostJob = ({ user }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
@@ -115,10 +132,18 @@ const PostJob = ({ user }) => {
       } else {
         toast.success('Job posted successfully! Freelancers can now apply.');
       }
+      if (setUser) {
+        try {
+          const me = await api.get('/user/me');
+          if (me.data?.balance !== undefined) {
+            setUser({ ...user, balance: me.data.balance });
+          }
+        } catch { /* ignore */ }
+      }
       navigate('/my-assignments');
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data || 'Failed to post job. Please try again.';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to post job.');
+      const msg = getErrorMessage(err, 'Failed to post job. Please try again.');
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

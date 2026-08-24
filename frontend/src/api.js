@@ -25,4 +25,29 @@ api.interceptors.response.use(
   }
 );
 
+/**
+ * Standardized error message extractor for backend responses
+ */
+export const getErrorMessage = (err, fallback = 'An unexpected error occurred. Please try again.') => {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err;
+  
+  const data = err.response?.data;
+  if (data) {
+    if (typeof data === 'string') return data;
+    if (data.message && typeof data.message === 'string') return data.message;
+    if (data.errors && typeof data.errors === 'object') {
+      const firstKey = Object.keys(data.errors)[0];
+      if (firstKey && data.errors[firstKey]) return data.errors[firstKey];
+    }
+    if (data.error && typeof data.error === 'string') return data.error;
+  }
+
+  if (err.message && typeof err.message === 'string' && !err.message.includes('Network Error')) {
+    return err.message;
+  }
+
+  return fallback;
+};
+
 export default api;

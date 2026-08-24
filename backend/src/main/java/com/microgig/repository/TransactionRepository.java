@@ -21,4 +21,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     @Query(value = "SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE user_id = :userId AND type = :type", nativeQuery = true)
     BigDecimal sumAmountByUserIdAndTypeNative(@Param("userId") Long userId, @Param("type") String type);
+
+    @Query(value = "SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE type = :type", nativeQuery = true)
+    BigDecimal sumAmountByTypeNative(@Param("type") String type);
+
+    @Query(value = "SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE type = 'PAYMENT'", nativeQuery = true)
+    BigDecimal sumTotalVolumeNative();
+
+    List<Transaction> findByTypeOrderByCreatedAtDesc(String type);
+
+    org.springframework.data.domain.Page<Transaction> findByTypeOrderByCreatedAtDesc(String type, org.springframework.data.domain.Pageable pageable);
 }

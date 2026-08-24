@@ -20,6 +20,9 @@ public interface WorkRequestRepository extends JpaRepository<WorkRequest, Long> 
     @Query("SELECT w FROM WorkRequest w WHERE w.status = :status ORDER BY w.createdAt DESC")
     List<WorkRequest> findByStatusOrderByCreatedAtDesc(@Param("status") WorkStatus status);
 
+    @Query("SELECT w FROM WorkRequest w WHERE w.status IN (com.microgig.model.WorkStatus.OPEN, com.microgig.model.WorkStatus.ASSIGNED, com.microgig.model.WorkStatus.COMPLETED) ORDER BY w.createdAt DESC")
+    List<WorkRequest> findPublicMarketplaceWork();
+
     @Query("SELECT w FROM WorkRequest w WHERE w.status = com.microgig.model.WorkStatus.FLAGGED ORDER BY w.appealRequested DESC, w.flaggedAt DESC, w.createdAt DESC")
     List<WorkRequest> findFlaggedWorkRequests();
 

@@ -112,14 +112,36 @@ public class AdminController {
     }
 
     /**
-     * PATCH /api/admin/work-requests/{id}/flag-manual
-     * Admin manually flags any job post for policy violations.
+     * PATCH /api/admin/work-requests/{id}/suspend
+     * Admin directly suspends any job post from Marketplace or Dashboard.
      */
-    @PatchMapping("/work-requests/{id}/flag-manual")
-    public ResponseEntity<WorkResponse> flagWorkRequestManually(@PathVariable Long id,
-                                                                @Valid @RequestBody ManualFlagRequest request,
-                                                                @AuthenticationPrincipal UserDetailsImpl userDetails) {
-        WorkResponse response = adminService.flagWorkRequestManually(userDetails.getId(), id, request);
+    @PatchMapping("/work-requests/{id}/suspend")
+    public ResponseEntity<WorkResponse> suspendWorkRequest(@PathVariable Long id,
+                                                           @RequestBody(required = false) Map<String, String> body,
+                                                           @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        String reason = body != null ? body.get("reason") : "Suspended by Administrator";
+        WorkResponse response = adminService.suspendWorkRequest(userDetails.getId(), id, reason);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * PATCH /api/admin/work-requests/{id}/unsuspend
+     * Admin restores a suspended job post back to the open marketplace.
+     */
+    @PatchMapping("/work-requests/{id}/unsuspend")
+    public ResponseEntity<WorkResponse> unsuspendWorkRequest(@PathVariable Long id,
+                                                             @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        WorkResponse response = adminService.unsuspendWorkRequest(userDetails.getId(), id);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /api/admin/earnings
+     * Admin retrieves comprehensive platform revenue metrics and commission transactions ledger.
+     */
+    @GetMapping("/earnings")
+    public ResponseEntity<PlatformEarningsResponse> getPlatformEarnings() {
+        PlatformEarningsResponse response = adminService.getPlatformEarnings();
         return ResponseEntity.ok(response);
     }
 }
