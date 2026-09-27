@@ -17,8 +17,7 @@ import java.time.LocalDateTime;
         @Index(name = "idx_wr_is_deleted", columnList = "is_deleted")
 })
 @SQLRestriction("is_deleted = false")
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -70,7 +69,7 @@ public class WorkRequest {
     @Column(name = "appeal_requested_at")
     private LocalDateTime appealRequestedAt;
 
-    // Soft Deletion Fields
+
     @Builder.Default
     @Column(name = "is_deleted", nullable = false)
     private Boolean isDeleted = false;

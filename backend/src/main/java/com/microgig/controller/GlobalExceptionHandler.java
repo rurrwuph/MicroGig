@@ -4,6 +4,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.LockedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -41,6 +43,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
         String msg = (ex.getMessage() != null && !ex.getMessage().isBlank()) ? ex.getMessage() : "Invalid username or password";
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(createErrorBody("Unauthorized", msg, HttpStatus.UNAUTHORIZED.value()));
+    }
+
+    @ExceptionHandler(LockedException.class)
+    public ResponseEntity<Map<String, Object>> handleLockedException(LockedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                createErrorBody("Account Locked", "Your account has been locked by an administrator. Please contact support.", HttpStatus.FORBIDDEN.value()));
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<Map<String, Object>> handleAuthenticationException(AuthenticationException ex) {
+        String msg = (ex.getMessage() != null && !ex.getMessage().isBlank()) ? ex.getMessage() : "Authentication failed";
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(createErrorBody("Unauthorized", msg, HttpStatus.UNAUTHORIZED.value()));
     }
 

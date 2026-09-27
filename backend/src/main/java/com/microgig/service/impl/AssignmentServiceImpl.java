@@ -303,31 +303,33 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         BigDecimal dealAmount = request.getAmount();
 
-        // Deduct full dealAmount from client
-        User client = userRepository.findById(request.getClient().getId())
-                .orElseThrow(() -> new IllegalArgumentException("Client not found"));
-        BigDecimal clientBal = client.getBalance() != null ? client.getBalance() : BigDecimal.ZERO;
-        if (clientBal.compareTo(dealAmount) < 0) {
-            throw new IllegalArgumentException("Client has insufficient balance ($" + clientBal
-                    + ") to release payment of $" + dealAmount + ".");
-        }
-        client.setBalance(clientBal.subtract(dealAmount));
-
-        Transaction debit = Transaction.builder()
-                .user(client)
-                .workAssignment(assignment)
-                .amount(dealAmount.negate())
-                .type("DEBIT")
-                .description("Payment for job: \"" + request.getTitle() + "\" to @" + assignment.getFreelancer().getUsername())
-                .createdAt(LocalDateTime.now())
-                .build();
-
-        // 0.1% Admin Platform Commission
+        // 0.1% Admin Platform Commission (paid by client upon releasing payment)
         BigDecimal adminCommission = dealAmount.multiply(adminCommissionRate).setScale(2, RoundingMode.HALF_UP);
         if (adminCommission.compareTo(new BigDecimal("0.01")) < 0 && dealAmount.compareTo(BigDecimal.ZERO) > 0) {
             adminCommission = new BigDecimal("0.01");
         }
-        BigDecimal netFreelancerPayout = dealAmount.subtract(adminCommission);
+
+        BigDecimal totalClientCharge = dealAmount.add(adminCommission);
+
+        // Deduct totalClientCharge (job dealAmount + platform fee) from client
+        User client = userRepository.findById(request.getClient().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Client not found"));
+        BigDecimal clientBal = client.getBalance() != null ? client.getBalance() : BigDecimal.ZERO;
+        if (clientBal.compareTo(totalClientCharge) < 0) {
+            throw new IllegalArgumentException("Client has insufficient balance ($" + clientBal
+                    + ") to release payment of $" + dealAmount + " + $" + adminCommission + " platform fee ($" + totalClientCharge + " total).");
+        }
+        client.setBalance(clientBal.subtract(totalClientCharge));
+
+        Transaction debit = Transaction.builder()
+                .user(client)
+                .workAssignment(assignment)
+                .amount(totalClientCharge.negate())
+                .type("DEBIT")
+                .description("Payment for job: \"" + request.getTitle() + "\" to @" + assignment.getFreelancer().getUsername()
+                        + " ($" + dealAmount + " + $" + adminCommission + " platform fee)")
+                .createdAt(LocalDateTime.now())
+                .build();
 
         Optional<User> adminOpt = userRepository.findFirstByRole(Role.ROLE_ADMIN);
         if (adminOpt.isPresent()) {
@@ -341,26 +343,24 @@ public class AssignmentServiceImpl implements AssignmentService {
                     .workAssignment(assignment)
                     .amount(adminCommission)
                     .type("COMMISSION")
-                    .description("Platform fee (0.1%) on job #" + request.getId() + " ('" + request.getTitle() + "') from client @" + client.getUsername())
+                    .description("Platform fee (0.1%) on job #" + request.getId() + " ('" + request.getTitle() + "') paid by client @" + client.getUsername())
                     .createdAt(LocalDateTime.now())
                     .build();
             transactionRepository.save(adminTx);
-        } else {
-            netFreelancerPayout = dealAmount;
         }
 
-        // Credit net payout to Freelancer
+        // Credit full dealAmount to Freelancer
         User freelancer = userRepository.findById(assignment.getFreelancer().getId())
                 .orElseThrow(() -> new IllegalArgumentException("Freelancer not found"));
         BigDecimal freelancerBal = freelancer.getBalance() != null ? freelancer.getBalance() : BigDecimal.ZERO;
-        freelancer.setBalance(freelancerBal.add(netFreelancerPayout));
+        freelancer.setBalance(freelancerBal.add(dealAmount));
 
         Transaction payment = Transaction.builder()
                 .user(freelancer)
                 .workAssignment(assignment)
-                .amount(netFreelancerPayout)
+                .amount(dealAmount)
                 .type("PAYMENT")
-                .description("Payout received for job: \"" + request.getTitle() + "\" (Net $" + netFreelancerPayout + " after $" + adminCommission + " platform fee) from @" + client.getUsername())
+                .description("Full payout received for job: \"" + request.getTitle() + "\" from @" + client.getUsername())
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -389,7 +389,7 @@ public class AssignmentServiceImpl implements AssignmentService {
                 .user(freelancer)
                 .type("PAYMENT_RECEIVED")
                 .title("Payment Received: " + request.getTitle())
-                .message("Client released payment of $" + netFreelancerPayout + " (net after 0.1% platform fee) for '" + request.getTitle() + "'.")
+                .message("Client released full payout of $" + dealAmount + " for '" + request.getTitle() + "'.")
                 .referenceId(request.getId())
                 .isRead(false)
                 .createdAt(LocalDateTime.now())

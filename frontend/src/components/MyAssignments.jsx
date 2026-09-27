@@ -422,7 +422,7 @@ const MyAssignments = ({ user, setUser }) => {
         rating: payForm.rating,
         review: payForm.review.trim(),
       });
-      toast.success('Payment released! Payout transferred to freelancer and 0.1% platform fee recorded.');
+      toast.success('Payment released! Full agreed payout transferred to freelancer and 0.1% platform fee paid.');
       setPayModalAssignment(null);
       fetchData();
       refreshUserData();
@@ -1185,16 +1185,20 @@ const MyAssignments = ({ user, setUser }) => {
             <form onSubmit={handlePay}>
               <div style={{ background: 'var(--clr-surface-2)', padding: '1rem', borderRadius: 'var(--r-md)', marginBottom: '1.25rem', border: '1px solid var(--clr-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                  <span>Total Job Budget:</span>
+                  <span>Agreed Job Amount:</span>
                   <strong>${Number(payModalAssignment.workRequest?.amount || 0).toFixed(2)}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--clr-text-3)', marginBottom: '0.35rem' }}>
-                  <span>Admin Platform Commission (0.1%):</span>
-                  <span>-${(Number(payModalAssignment.workRequest?.amount || 0) * 0.001).toFixed(2)}</span>
+                  <span>Freelancer Payout (100%):</span>
+                  <span style={{ color: 'var(--clr-success)', fontWeight: 600 }}>${Number(payModalAssignment.workRequest?.amount || 0).toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--clr-text-3)', marginBottom: '0.35rem' }}>
+                  <span>Platform Fee (0.1% paid by Client):</span>
+                  <span>+${Math.max(0.01, Number(payModalAssignment.workRequest?.amount || 0) * 0.001).toFixed(2)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--clr-primary)', fontWeight: 700, borderTop: '1px solid var(--clr-border)', paddingTop: '0.35rem' }}>
-                  <span>Net Freelancer Payout:</span>
-                  <span>${(Number(payModalAssignment.workRequest?.amount || 0) * 0.999).toFixed(2)}</span>
+                  <span>Total Deducted from Client:</span>
+                  <span>${(Number(payModalAssignment.workRequest?.amount || 0) + Math.max(0.01, Number(payModalAssignment.workRequest?.amount || 0) * 0.001)).toFixed(2)}</span>
                 </div>
               </div>
 
@@ -1219,7 +1223,7 @@ const MyAssignments = ({ user, setUser }) => {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-success" disabled={payLoading}>
-                  {payLoading ? <><span className="spinner" /> Processing…</> : `Confirm Release ($${Number(payModalAssignment.workRequest?.amount || 0).toFixed(2)})`}
+                  {payLoading ? <><span className="spinner" /> Processing…</> : `Confirm Release ($${(Number(payModalAssignment.workRequest?.amount || 0) + Math.max(0.01, Number(payModalAssignment.workRequest?.amount || 0) * 0.001)).toFixed(2)})`}
                 </button>
               </div>
             </form>

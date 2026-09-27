@@ -6,15 +6,35 @@ MicroGig is a modern full-stack freelance and gig economy web platform built wit
 
 ## ⚡ Quick Start (Docker)
 
-To run the entire system with pre-seeded data in seconds:
+1. **Configure Environment Variables:**
+   ```bash
+   cp .env.example .env
+   # Edit .env to set your GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET if using Google OAuth
+   ```
 
-```bash
-docker compose up --build -d
-```
+2. **Launch with Docker Compose:**
+   ```bash
+   docker compose up --build -d
+   ```
 
 - **Frontend Application:** [http://localhost:3000](http://localhost:3000)
 - **Backend API & Swagger:** [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
 - **pgAdmin Database UI:** [http://localhost:5050](http://localhost:5050)
+
+---
+
+## 🧪 Automated Backend API Test Suite
+
+Run the full end-to-end backend test suite (covering Auth, Work requests, Bids, Payments, Admin, RBAC, etc.):
+
+- **Linux / macOS / Git Bash:**
+  ```bash
+  bash test_backend.sh
+  ```
+- **Windows PowerShell:**
+  ```powershell
+  .\test_backend.ps1
+  ```
 
 ---
 

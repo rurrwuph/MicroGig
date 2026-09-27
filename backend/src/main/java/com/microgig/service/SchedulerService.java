@@ -22,6 +22,9 @@ public class SchedulerService {
     private final WorkAssignmentRepository assignmentRepository;
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
+    private final WorkRequestRepository workRequestRepository;
+    private final NotificationRepository notificationRepository;
+    private final org.springframework.cache.CacheManager cacheManager;
 
     @Scheduled(fixedRate = 60000) // Run every minute
     @Transactional
@@ -60,6 +63,43 @@ public class SchedulerService {
                             userRepository.save(client);
                         }
                     }
+                }
+            }
+
+            // 3. Auto-remove OPEN work requests whose due date / deadline has passed
+            List<WorkRequest> openWorkRequests = workRequestRepository.findByStatusOrderByCreatedAtDesc(WorkStatus.OPEN);
+            boolean evictedCache = false;
+            for (WorkRequest wr : openWorkRequests) {
+                if (wr.getDeadline() != null && now.isAfter(wr.getDeadline())) {
+                    wr.setStatus(WorkStatus.CANCELLED);
+                    wr.setIsDeleted(true);
+                    wr.setDeletedAt(now);
+                    wr.setCancelledAt(now);
+                    workRequestRepository.save(wr);
+
+                    Notification notification = Notification.builder()
+                            .user(wr.getClient())
+                            .type("JOB_EXPIRED")
+                            .title("Job Posting Expired: " + wr.getTitle())
+                            .message("Your job post '" + wr.getTitle() + "' was automatically removed because the deadline passed without an assigned freelancer.")
+                            .referenceId(wr.getId())
+                            .isRead(false)
+                            .createdAt(now)
+                            .build();
+                    notificationRepository.save(notification);
+                    evictedCache = true;
+                    log.info("Auto-removed expired work request ID: {} - '{}'", wr.getId(), wr.getTitle());
+                }
+            }
+
+            if (evictedCache && cacheManager != null) {
+                try {
+                    var cache = cacheManager.getCache("availableWork");
+                    if (cache != null) {
+                        cache.clear();
+                    }
+                } catch (Exception ex) {
+                    log.warn("Failed to clear availableWork cache after expiring jobs: {}", ex.getMessage());
                 }
             }
         } catch (Exception e) {

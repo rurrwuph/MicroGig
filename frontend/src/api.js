@@ -14,12 +14,17 @@ api.interceptors.request.use((config) => {
 });
 
 // Handle 401 Unauthorized — clear session and redirect to login
+// EXCEPT for auth endpoints (signin/signup) where 401 means bad credentials, not expired session
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.clear();
-      window.location.href = '/login';
+      const url = error.config?.url || '';
+      const isAuthEndpoint = url.includes('/auth/signin') || url.includes('/auth/signup');
+      if (!isAuthEndpoint) {
+        localStorage.clear();
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

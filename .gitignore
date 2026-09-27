@@ -1,7 +1,6 @@
 # Environment & Local Configuration
 .env
 .env.local
-.env.example
 *.log
 
 # Local Documentation & Instructions

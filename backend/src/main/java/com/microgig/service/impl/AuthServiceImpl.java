@@ -37,14 +37,15 @@ public class AuthServiceImpl implements AuthService {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtUtils.generateJwtToken(authentication);
-
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
 
+        // Check locked status BEFORE generating JWT token
         if (!userDetails.isAccountNonLocked()) {
-            throw new BadCredentialsException("Error: Account is locked!");
+            throw new org.springframework.security.authentication.LockedException("Your account has been locked by an administrator. Please contact support.");
         }
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        String jwt = jwtUtils.generateJwtToken(authentication);
 
         String role = userDetails.getAuthorities().iterator().next().getAuthority();
 

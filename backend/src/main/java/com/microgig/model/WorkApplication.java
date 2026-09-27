@@ -12,8 +12,7 @@ import java.time.LocalDateTime;
         @Index(name = "idx_wapp_freelancer_id", columnList = "freelancer_id"),
         @Index(name = "idx_wapp_status", columnList = "status")
 })
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -23,11 +22,11 @@ public class WorkApplication {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne
     @JoinColumn(name = "work_request_id", nullable = false)
     private WorkRequest workRequest;
 
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne
     @JoinColumn(name = "freelancer_id", nullable = false)
     private User freelancer;
 

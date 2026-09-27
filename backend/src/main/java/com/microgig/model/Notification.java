@@ -11,8 +11,7 @@ import java.time.LocalDateTime;
         @Index(name = "idx_notif_user_read", columnList = "user_id, is_read"),
         @Index(name = "idx_notif_created_at", columnList = "created_at")
 })
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder

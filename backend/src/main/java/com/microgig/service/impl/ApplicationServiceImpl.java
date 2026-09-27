@@ -169,7 +169,10 @@ public class ApplicationServiceImpl implements ApplicationService {
             }
         }
 
-        // Transition WorkRequest status
+        // Transition WorkRequest status and update agreed price to the accepted proposal's bid amount
+        if (chosenApp.getBidAmount() != null) {
+            workRequest.setAmount(chosenApp.getBidAmount());
+        }
         workRequest.setStatus(WorkStatus.ASSIGNED);
         requestRepository.save(workRequest);
 
@@ -189,7 +192,7 @@ public class ApplicationServiceImpl implements ApplicationService {
                 .user(chosenApp.getFreelancer())
                 .type("APPLICATION_ACCEPTED")
                 .title("Proposal Accepted! " + workRequest.getTitle())
-                .message("Congratulations! @" + workRequest.getClient().getUsername() + " accepted your proposal for '" + workRequest.getTitle() + "'. Work is now active.")
+                .message("Congratulations! @" + workRequest.getClient().getUsername() + " accepted your proposal of $" + chosenApp.getBidAmount() + " for '" + workRequest.getTitle() + "'. Work is now active.")
                 .referenceId(workRequest.getId())
                 .isRead(false)
                 .createdAt(now)
